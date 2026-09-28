@@ -1,0 +1,625 @@
+/* =========================================================================
+   Engineering Journal — design system for calshankar.github.io
+   Palette: cream paper / ink / cobalt blueprint / cadmium signal
+   Type:    Fraunces (display) · IBM Plex Sans (body) · IBM Plex Mono (metric)
+   ========================================================================= */
+
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,300..900,0..100&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
+
+:root {
+	/* Palette — light (paper) */
+	--paper:        #f4ede1;
+	--paper-deep:   #ece2cf;
+	--ink:          #1c1a17;
+	--ink-soft:     #3a342c;
+	--ink-mute:     #6b6356;
+	--rule:         #c5b9a3;
+	--cobalt:       #1b3a6b;
+	--cobalt-deep:  #122a4f;
+	--cobalt-soft:  #d6dee8;
+	--cadmium:      #c7541f;
+	--cadmium-strong: #993f17;
+	--cadmium-soft: #f4e0d2;
+	--rule-strong:  #8d8169;
+
+	/* Type */
+	--sl-font:      'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+	--sl-font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+	--font-display: 'Fraunces', 'Source Serif 4', Georgia, 'Times New Roman', serif;
+
+	/* Starlight surface — light mode */
+	--sl-color-bg:           var(--paper);
+	--sl-color-bg-nav:       var(--paper);
+	--sl-color-bg-sidebar:   var(--paper);
+	--sl-color-text:         var(--ink);
+	--sl-color-text-accent:  var(--cobalt);
+	--sl-color-accent:       var(--cobalt);
+	--sl-color-accent-low:   var(--cobalt-soft);
+	--sl-color-accent-high:  var(--cobalt-deep);
+	--sl-color-white:        var(--ink);
+	--sl-color-gray-1:       var(--ink);
+	--sl-color-gray-2:       var(--ink-soft);
+	--sl-color-gray-3:       var(--ink-mute);
+	--sl-color-gray-4:       var(--rule);
+	--sl-color-gray-5:       var(--paper-deep);
+	--sl-color-gray-6:       var(--paper-deep);
+	--sl-color-gray-7:       var(--paper);
+
+	/* Sidebar/toc */
+	--sl-color-hairline:        var(--rule);
+	--sl-color-hairline-light:  var(--rule);
+	--sl-color-hairline-shade:  var(--rule);
+}
+
+:root[data-theme='dark'] {
+	--paper:        #15140f;
+	--paper-deep:   #1d1b16;
+	--ink:          #f1ead8;
+	--ink-soft:     #d6cdb7;
+	--ink-mute:     #9a917c;
+	--rule:         #3a3328;
+	--cobalt:       #8fb5ea;
+	--cobalt-deep:  #bcd1f0;
+	--cobalt-soft:  #1c2e4a;
+	--cadmium:      #e8895a;
+	--cadmium-strong: #e8895a;
+	--cadmium-soft: #2a1f17;
+	--rule-strong:  #5e5343;
+
+	--sl-color-bg:           var(--paper);
+	--sl-color-bg-nav:       var(--paper);
+	--sl-color-bg-sidebar:   var(--paper);
+	--sl-color-text:         var(--ink);
+	--sl-color-text-accent:  var(--cobalt-deep);
+	--sl-color-accent:       var(--cobalt);
+	--sl-color-accent-low:   var(--cobalt-soft);
+	--sl-color-accent-high:  var(--cobalt-deep);
+	--sl-color-white:        var(--ink);
+	--sl-color-gray-1:       var(--ink);
+	--sl-color-gray-2:       var(--ink-soft);
+	--sl-color-gray-3:       var(--ink-mute);
+	--sl-color-gray-4:       var(--rule);
+	--sl-color-gray-5:       var(--paper-deep);
+	--sl-color-gray-6:       var(--paper-deep);
+	--sl-color-gray-7:       var(--paper-deep);
+}
+
+/* Body — softer paper texture via repeating gradient */
+body {
+	font-family: var(--sl-font);
+	background:
+		radial-gradient(1200px 600px at 110% -10%, var(--cobalt-soft) 0%, transparent 60%),
+		radial-gradient(900px 500px at -10% 110%, var(--cadmium-soft) 0%, transparent 65%),
+		var(--paper);
+	background-attachment: fixed;
+	color: var(--ink);
+}
+
+/* Headings on inner Starlight pages — Fraunces with optical sizing */
+:where(.sl-markdown-content) h1,
+:where(.sl-markdown-content) h2,
+:where(.sl-markdown-content) h3,
+h1#_top {
+	font-family: var(--font-display);
+	font-variation-settings: 'opsz' 60, 'SOFT' 50;
+	letter-spacing: -0.012em;
+	font-weight: 600;
+}
+
+:where(.sl-markdown-content) h1,
+h1#_top {
+	font-variation-settings: 'opsz' 144, 'SOFT' 30;
+	font-weight: 500;
+	letter-spacing: -0.022em;
+	color: var(--ink);
+	line-height: 1.05;
+}
+
+/*
+ * Starlight wraps headings as:
+ *   <div class="sl-heading-wrapper level-h2"><h2>…</h2><a class="sl-anchor-link">…</a></div>
+ * and sets the h2 to display:inline so the anchor sits on the same line.
+ * A border-bottom on the inline h2 only underlines the text box (and padding for the
+ * icon), so lines look short / uneven. Put the rule on the full-width wrapper instead.
+ */
+:where(.sl-markdown-content) .sl-heading-wrapper.level-h2 {
+	border-bottom: 1px solid var(--rule);
+	padding-bottom: 0.4em;
+	margin-top: 2.6em;
+}
+:where(.sl-markdown-content) .sl-heading-wrapper.level-h2 > :first-child {
+	/* Clear any leftover underline if an older rule targeted h2 directly */
+	border-bottom: none;
+	padding-bottom: 0;
+	margin-top: 0;
+}
+
+/* Inner page tables — make them feel like printed ledgers */
+:where(.sl-markdown-content) table {
+	border-collapse: collapse;
+	border: 1px solid var(--rule);
+}
+:where(.sl-markdown-content) th {
+	font-family: var(--sl-font-mono);
+	font-weight: 600;
+	font-size: 0.8em;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: var(--ink-soft);
+	background: var(--paper-deep);
+	border-bottom: 1px solid var(--rule);
+}
+:where(.sl-markdown-content) td {
+	border-bottom: 1px solid var(--rule);
+}
+
+/* Inline code on inner pages */
+:where(.sl-markdown-content) :not(pre) > code {
+	background: var(--cobalt-soft);
+	color: var(--cobalt-deep);
+	border-radius: 0.2em;
+	padding: 0.1em 0.35em;
+	font-size: 0.85em;
+}
+
+/* Blockquotes */
+:where(.sl-markdown-content) blockquote {
+	border-left: 3px solid var(--cobalt);
+	background: transparent;
+	font-style: italic;
+	color: var(--ink-soft);
+	padding-left: 1em;
+}
+
+/* Sidebar styling — tighter, more journal-like */
+.sidebar-pane {
+	border-right: 1px solid var(--rule) !important;
+}
+ul.top-level li > a,
+ul.top-level li > details > summary {
+	font-family: var(--sl-font-mono);
+	font-size: 0.85rem;
+	letter-spacing: 0.02em;
+}
+
+/* =========================================================================
+   LANDING PAGE — only applies inside .ej-landing
+   ========================================================================= */
+
+.ej-landing {
+	font-family: var(--sl-font);
+	color: var(--ink);
+	min-height: 100vh;
+	padding: clamp(2rem, 5vw, 5rem) clamp(1.25rem, 5vw, 4rem) 6rem;
+	max-width: 1240px;
+	margin: 0 auto;
+	position: relative;
+}
+
+/* Top masthead */
+.ej-masthead {
+	display: grid;
+	grid-template-columns: 1fr auto;
+	align-items: baseline;
+	gap: 0.5rem 2rem;
+	padding-bottom: 1rem;
+	border-bottom: 1px solid var(--rule);
+	font-family: var(--sl-font-mono);
+	font-size: 0.78rem;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--ink-mute);
+}
+.ej-masthead .colophon {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem 1.5rem;
+	align-items: baseline;
+}
+.ej-masthead a {
+	color: var(--ink);
+	text-decoration: none;
+	border-bottom: 1px dotted var(--ink-mute);
+	padding-bottom: 1px;
+	white-space: nowrap;
+}
+.ej-masthead a:hover { color: var(--cadmium-strong); border-bottom-color: var(--cadmium-strong); }
+
+@media (max-width: 640px) {
+	.ej-masthead {
+		grid-template-columns: 1fr;
+		font-size: 0.7rem;
+		letter-spacing: 0.06em;
+	}
+	.ej-masthead .colophon { gap: 0.4rem 1rem; }
+}
+
+.ej-vol {
+	font-variant-numeric: tabular-nums;
+}
+
+/* Hero */
+.ej-hero {
+	padding: clamp(2.5rem, 8vw, 5rem) 0 clamp(2rem, 5vw, 4rem);
+	display: grid;
+	grid-template-columns: minmax(0, 1.15fr) minmax(220px, 0.85fr);
+	gap: clamp(1.5rem, 4vw, 3rem);
+	align-items: center;
+}
+.ej-hero-copy { min-width: 0; }
+.ej-hero-art {
+	color: var(--cobalt);
+	width: 100%;
+	max-width: 420px;
+	justify-self: end;
+	filter: drop-shadow(0 18px 40px color-mix(in srgb, var(--cobalt) 18%, transparent));
+}
+.ej-hero-art svg {
+	width: 100%;
+	height: auto;
+	display: block;
+	overflow: visible;
+}
+.ej-hero-art text {
+	font-family: var(--sl-font-mono);
+	font-size: 11px;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	fill: var(--ink-mute);
+}
+.ej-art-nodes circle {
+	fill: var(--paper);
+	stroke: var(--cobalt);
+	stroke-width: 2;
+}
+.ej-art-nodes .pulse {
+	fill: url(#orb);
+	stroke: none;
+	transform-box: fill-box;
+	transform-origin: center;
+	animation: ej-pulse 2.8s ease-in-out infinite;
+}
+.ej-art-links line { opacity: 0.45; }
+
+@keyframes ej-pulse {
+	0%, 100% { transform: scale(1); opacity: 1; }
+	50% { transform: scale(1.08); opacity: 0.85; }
+}
+
+@media (max-width: 860px) {
+	.ej-hero {
+		grid-template-columns: 1fr;
+	}
+	.ej-hero-art {
+		justify-self: stretch;
+		max-width: none;
+		order: -1;
+	}
+}
+
+.ej-eyebrow {
+	font-family: var(--sl-font-mono);
+	font-size: 0.78rem;
+	letter-spacing: 0.18em;
+	text-transform: uppercase;
+	color: var(--cadmium-strong);
+	margin: 0;
+}
+
+.ej-title {
+	font-family: var(--font-display);
+	font-weight: 400;
+	font-size: clamp(2.6rem, 7vw, 5.75rem);
+	line-height: 0.95;
+	letter-spacing: -0.03em;
+	color: var(--ink);
+	margin: 0.25em 0 0;
+	font-variation-settings: 'opsz' 144, 'SOFT' 30;
+	animation: ej-render 1.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.ej-title em {
+	font-style: italic;
+	color: var(--cobalt);
+	font-weight: 400;
+	font-variation-settings: 'opsz' 144, 'SOFT' 100;
+}
+
+@keyframes ej-render {
+	0%   { opacity: 0; font-variation-settings: 'opsz' 9, 'SOFT' 100; transform: translateY(8px); }
+	100% { opacity: 1; font-variation-settings: 'opsz' 144, 'SOFT' 30; transform: translateY(0); }
+}
+
+.ej-role {
+	font-family: var(--sl-font-mono);
+	font-size: clamp(0.95rem, 1.4vw, 1.05rem);
+	color: var(--ink-soft);
+	letter-spacing: 0.02em;
+	margin-top: 1.25rem;
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.85rem;
+	align-items: center;
+}
+.ej-role .dot {
+	width: 6px; height: 6px; border-radius: 50%;
+	background: var(--cadmium);
+}
+
+/* Section divider with crosshairs — single-row grid: [label] [line] [crosshair] */
+.ej-rule {
+	display: grid;
+	grid-template-columns: auto 1fr auto;
+	align-items: center;
+	gap: 0.75rem;
+	margin: clamp(3rem, 6vw, 4rem) 0 clamp(1.5rem, 3vw, 2rem);
+	color: var(--ink-mute);
+	font-family: var(--sl-font-mono);
+	font-size: 0.74rem;
+	letter-spacing: 0.18em;
+	text-transform: uppercase;
+}
+.ej-rule .label { padding-right: 0.5rem; white-space: nowrap; }
+.ej-rule .ord { color: var(--cadmium-strong); }
+.ej-rule .line { display: block; height: 1px; background: var(--rule); min-width: 0; }
+.ej-rule .crosshair {
+	color: var(--rule-strong);
+	font-family: var(--sl-font-mono);
+	white-space: nowrap;
+}
+
+/* TL;DR — editorial paragraph with drop cap */
+.ej-tldr {
+	display: grid;
+	grid-template-columns: 1fr;
+	gap: 1rem;
+	max-width: 68ch;
+	font-size: clamp(1.05rem, 1.4vw, 1.2rem);
+	line-height: 1.55;
+	color: var(--ink-soft);
+}
+.ej-tldr p { margin: 0; }
+.ej-tldr p:first-of-type::first-letter {
+	font-family: var(--font-display);
+	font-variation-settings: 'opsz' 144, 'SOFT' 0;
+	font-weight: 500;
+	font-size: 4.2em;
+	float: left;
+	line-height: 0.85;
+	padding: 0.08em 0.12em 0 0;
+	color: var(--cobalt);
+}
+.ej-tldr strong { color: var(--ink); font-weight: 600; }
+
+/* Metric ledger */
+.ej-ledger {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+	gap: 0;
+	border-top: 1px solid var(--rule);
+	border-left: 1px solid var(--rule);
+	margin-top: 2rem;
+}
+.ej-ledger .cell {
+	padding: 1.25rem 1.25rem 1.5rem;
+	border-right: 1px solid var(--rule);
+	border-bottom: 1px solid var(--rule);
+	background: transparent;
+	display: flex;
+	flex-direction: column;
+	gap: 0.4rem;
+	opacity: 0;
+	animation: ej-fade-up 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+.ej-ledger .cell:nth-child(1) { animation-delay: 0.6s; }
+.ej-ledger .cell:nth-child(2) { animation-delay: 0.75s; }
+.ej-ledger .cell:nth-child(3) { animation-delay: 0.9s; }
+.ej-ledger .cell:nth-child(4) { animation-delay: 1.05s; }
+.ej-ledger .cell:nth-child(5) { animation-delay: 1.2s; }
+.ej-ledger .cell:nth-child(6) { animation-delay: 1.35s; }
+
+.ej-ledger .figure {
+	font-family: var(--sl-font-mono);
+	font-weight: 600;
+	font-size: clamp(1.8rem, 3.5vw, 2.4rem);
+	color: var(--cadmium);
+	letter-spacing: -0.01em;
+	font-variant-numeric: tabular-nums;
+	line-height: 1;
+}
+.ej-ledger .caption {
+	font-family: var(--sl-font-mono);
+	font-size: 0.72rem;
+	color: var(--ink-mute);
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+	margin-top: 0.5rem;
+}
+.ej-ledger .note {
+	font-size: 0.92rem;
+	color: var(--ink-soft);
+	line-height: 1.4;
+}
+
+@keyframes ej-fade-up {
+	from { opacity: 0; transform: translateY(10px); }
+	to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Featured work — ledger-style index */
+.ej-works {
+	display: grid;
+	grid-template-columns: 1fr;
+	gap: 0;
+	border-top: 1px solid var(--rule);
+}
+.ej-work {
+	display: grid;
+	grid-template-columns: 6ch 1fr auto;
+	gap: clamp(1rem, 3vw, 2.5rem);
+	padding: 1.4rem 0;
+	border-bottom: 1px solid var(--rule);
+	text-decoration: none;
+	color: var(--ink);
+	transition: background 0.25s ease, padding-left 0.25s ease;
+	position: relative;
+}
+.ej-work:hover {
+	background:
+		linear-gradient(90deg, var(--paper-deep) 0%, transparent 100%);
+	padding-left: 1rem;
+}
+.ej-work:hover .ej-work-title em { color: var(--cadmium); }
+
+.ej-work-no {
+	font-family: var(--sl-font-mono);
+	font-size: 0.78rem;
+	color: var(--cadmium-strong);
+	letter-spacing: 0.08em;
+	padding-top: 0.45rem;
+	font-variant-numeric: tabular-nums;
+}
+.ej-work-body { display: flex; flex-direction: column; gap: 0.35rem; }
+.ej-work-title {
+	font-family: var(--font-display);
+	font-variation-settings: 'opsz' 60, 'SOFT' 50;
+	font-weight: 500;
+	font-size: clamp(1.25rem, 2vw, 1.65rem);
+	line-height: 1.2;
+	letter-spacing: -0.01em;
+}
+.ej-work-title em {
+	font-style: italic;
+	color: var(--cobalt);
+	transition: color 0.25s ease;
+}
+.ej-work-blurb {
+	color: var(--ink-soft);
+	font-size: 0.97rem;
+	line-height: 1.5;
+	max-width: 65ch;
+}
+.ej-work-meta {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.75rem;
+	margin-top: 0.35rem;
+	font-family: var(--sl-font-mono);
+	font-size: 0.72rem;
+	color: var(--ink-mute);
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+}
+.ej-work-meta .chip {
+	border: 1px solid var(--rule);
+	padding: 0.15rem 0.5rem;
+	border-radius: 2px;
+	background: var(--paper-deep);
+}
+.ej-work-meta .chip.signal {
+	color: var(--cadmium-strong);
+	border-color: var(--cadmium-strong);
+	background: transparent;
+}
+.ej-work-arrow {
+	font-family: var(--sl-font-mono);
+	font-size: 1.1rem;
+	color: var(--ink-mute);
+	padding-top: 0.45rem;
+	align-self: start;
+	transition: transform 0.25s ease, color 0.25s ease;
+}
+.ej-work:hover .ej-work-arrow { transform: translateX(4px); color: var(--cadmium); }
+
+/* Practice list — two-column with rule */
+.ej-practice {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+	gap: 0;
+}
+.ej-practice .item {
+	padding: 1.4rem 1.5rem 1.4rem 0;
+	border-right: 1px solid var(--rule);
+	text-decoration: none;
+	color: inherit;
+	display: block;
+	transition: background 0.25s ease, padding-left 0.25s ease;
+}
+.ej-practice a.item:hover {
+	background: linear-gradient(90deg, var(--paper-deep) 0%, transparent 100%);
+	padding-left: 0.75rem;
+}
+.ej-practice .item:last-child { border-right: none; }
+.ej-practice h3 {
+	font-family: var(--font-display);
+	font-variation-settings: 'opsz' 36, 'SOFT' 50;
+	font-weight: 500;
+	font-size: 1.15rem;
+	margin: 0 0 0.5rem;
+	letter-spacing: -0.005em;
+}
+.ej-practice h3::before {
+	content: '§';
+	color: var(--cadmium-strong);
+	margin-right: 0.4em;
+	font-style: italic;
+}
+.ej-practice p {
+	color: var(--ink-soft);
+	font-size: 0.95rem;
+	line-height: 1.5;
+	margin: 0;
+}
+
+/* Footer / contact */
+.ej-foot {
+	margin-top: clamp(3rem, 6vw, 4rem);
+	padding-top: 1.5rem;
+	border-top: 2px solid var(--ink);
+	display: grid;
+	grid-template-columns: 1fr;
+	gap: 1.25rem;
+}
+.ej-foot .reach {
+	font-family: var(--font-display);
+	font-variation-settings: 'opsz' 96, 'SOFT' 50;
+	font-weight: 400;
+	font-size: clamp(1.6rem, 3.5vw, 2.4rem);
+	line-height: 1.1;
+	margin: 0;
+	max-width: 28ch;
+}
+.ej-foot .reach em { font-style: italic; color: var(--cobalt); }
+.ej-foot .links {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 1.25rem;
+	font-family: var(--sl-font-mono);
+	font-size: 0.85rem;
+	letter-spacing: 0.04em;
+}
+.ej-foot .links a {
+	color: var(--ink);
+	text-decoration: none;
+	border-bottom: 1px solid var(--ink);
+	padding-bottom: 2px;
+	transition: color 0.25s ease, border-color 0.25s ease;
+}
+.ej-foot .links a:hover {
+	color: var(--cadmium-strong);
+	border-color: var(--cadmium-strong);
+}
+.ej-foot .meta {
+	font-family: var(--sl-font-mono);
+	font-size: 0.74rem;
+	color: var(--ink-mute);
+	text-transform: uppercase;
+	letter-spacing: 0.12em;
+	margin-top: 1.5rem;
+}
+
+/* Reduced motion respect */
+@media (prefers-reduced-motion: reduce) {
+	.ej-title,
+	.ej-ledger .cell,
+	.ej-art-nodes .pulse { animation: none; opacity: 1; transform: none; }
+}

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1b3a6b"/>
+      <stop offset="100%" stop-color="#c7541f"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="12" fill="url(#g)"/>
+  <text x="50%" y="50%" dominant-baseline="central" text-anchor="middle"
+        font-family="IBM Plex Mono, ui-monospace, monospace" font-size="22" font-weight="700"
+        fill="#f4ede1">SR</text>
+</svg>

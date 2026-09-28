@@ -1,0 +1,328 @@
+---
+// Custom landing page. Inner pages (Blogs / TechStack / About) stay Starlight-managed.
+// Projects section commented out until content is ready.
+import '../styles/custom.css';
+
+const today = new Date().toLocaleDateString('en-GB', {
+	year: 'numeric',
+	month: 'long',
+	day: 'numeric',
+});
+const volume = `${new Date().getFullYear() - 2014}`;
+---
+
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta
+			name="description"
+			content="Shankar Ramanathan — Platform Engineering Leader and SRE Architect. 11+ years scaling Kubernetes platforms, GitOps, FinOps, and high-performing platform teams."
+		/>
+		<title>Shankar Ramanathan — Platform Engineering Leader</title>
+		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+		<link rel="preconnect" href="https://fonts.googleapis.com" />
+		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+		<link
+			rel="stylesheet"
+			href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,300..900,0..100&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap"
+		/>
+		<meta property="og:title" content="Shankar Ramanathan — Platform Engineering Leader" />
+		<meta
+			property="og:description"
+			content="11+ years scaling cloud-native infrastructure. Self-service Kubernetes platforms spanning 100+ clusters and 2k+ compute instances."
+		/>
+		<meta property="og:url" content="https://calshankar.github.io" />
+		<meta property="og:type" content="website" />
+		<meta name="twitter:card" content="summary_large_image" />
+		<script is:inline>
+			(function () {
+				try {
+					var stored = localStorage.getItem('starlight-theme');
+					var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+					var theme = stored && stored !== 'auto' ? stored : prefersDark ? 'dark' : 'light';
+					document.documentElement.dataset.theme = theme;
+				} catch (e) {
+					/* localStorage blocked — fall through to default light */
+				}
+			})();
+		</script>
+	</head>
+	<body class="ej-body">
+		<main class="ej-landing">
+			<header class="ej-masthead">
+				<div class="colophon">
+					<span class="ej-vol">{volume}</span>
+					<span>{today}</span>
+				</div>
+				<nav class="colophon">
+					{/* <a href="/projects/gitops-eks-scale/">Projects</a> */}
+					<a href="/blogs/arc-zonal-shift-eks-blog/">Blogs</a>
+					<a href="/techstack/">Tech-Stack</a>
+					<a href="/about/">About</a>
+					<a
+						href="https://www.linkedin.com/in/shankar-ramanathan-a5715b9/recent-activity/all/"
+						rel="noopener"
+						target="_blank">Linked-in</a
+					>
+				</nav>
+			</header>
+
+			<section class="ej-hero">
+				<div class="ej-hero-copy">
+					<p class="ej-eyebrow">Shankar Ramanathan · Portfolio</p>
+					<h1 class="ej-title">Platform<br /><em>as a product.</em></h1>
+					<p class="ej-role">
+						<span>Platform Leader</span><span class="dot"></span>
+						<span>SRE Architect</span><span class="dot"></span>
+						<span>CKA</span><span class="dot"></span>
+						<span>Open to opportunities · GMT+5:30</span>
+					</p>
+				</div>
+				<div class="ej-hero-art" aria-hidden="true">
+					<svg viewBox="0 0 420 320" xmlns="http://www.w3.org/2000/svg">
+						<defs>
+							<pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
+								<path d="M 20 0 L 0 0 0 20" fill="none" stroke="currentColor" stroke-width="0.6" opacity="0.35"></path>
+							</pattern>
+							<linearGradient id="orb" x1="0" y1="0" x2="1" y2="1">
+								<stop offset="0%" stop-color="var(--cobalt)"></stop>
+								<stop offset="100%" stop-color="var(--cadmium)"></stop>
+							</linearGradient>
+						</defs>
+						<rect class="ej-art-grid" x="8" y="8" width="404" height="304" fill="url(#grid)"></rect>
+						<rect x="8" y="8" width="404" height="304" fill="none" stroke="currentColor" stroke-width="1" opacity="0.35"></rect>
+						<g class="ej-art-links" fill="none" stroke="currentColor" stroke-width="1.2">
+							<line x1="80" y1="160" x2="210" y2="70"></line>
+							<line x1="80" y1="160" x2="210" y2="160"></line>
+							<line x1="80" y1="160" x2="210" y2="250"></line>
+							<line x1="210" y1="70" x2="340" y2="120"></line>
+							<line x1="210" y1="160" x2="340" y2="120"></line>
+							<line x1="210" y1="160" x2="340" y2="210"></line>
+							<line x1="210" y1="250" x2="340" y2="210"></line>
+						</g>
+						<g class="ej-art-nodes">
+							<circle class="pulse" cx="80" cy="160" r="18"></circle>
+							<circle cx="210" cy="70" r="12"></circle>
+							<circle cx="210" cy="160" r="14"></circle>
+							<circle cx="210" cy="250" r="12"></circle>
+							<circle cx="340" cy="120" r="16"></circle>
+							<circle cx="340" cy="210" r="16"></circle>
+						</g>
+						<text x="80" y="198" text-anchor="middle">GitOps</text>
+						<text x="210" y="48" text-anchor="middle">EKS</text>
+						<text x="210" y="188" text-anchor="middle">FinOps</text>
+						<text x="210" y="278" text-anchor="middle">Policy</text>
+						<text x="340" y="98" text-anchor="middle">Argo</text>
+						<text x="340" y="246" text-anchor="middle">Karpenter</text>
+					</svg>
+				</div>
+			</section>
+
+			<div class="ej-rule" role="presentation">
+				<span class="label"><span class="ord">§ I.</span> &nbsp;Field notes</span>
+				<span class="line"></span>
+				<span class="crosshair">+&nbsp;&nbsp;+&nbsp;&nbsp;+</span>
+			</div>
+
+			<section class="ej-tldr">
+				<p>
+					<strong>Eleven+ years</strong> scaling cloud-native infrastructure and building
+					platform teams. Recent leadership work has been architecting self-service
+					Kubernetes environments for large SaaS platforms:
+					<strong>100+ microservices</strong>, <strong>100 Kubernetes clusters</strong>,
+					and <strong>2k+ compute instances</strong>. I treat the internal platform as a
+					product paved roads, policy-as-code, and roadmaps that line up with
+					reliability, security, and FinOps.
+				</p>
+				<p>
+					Hands-on through GitOps with Crossplane and Argo CD, progressive delivery with
+					KubeVela and Argo Rollouts, Karpenter/KEDA autoscaling, Kyverno guardrails, and
+					deep observability. Open to
+					<strong>Platform Engineering/SRE Leadership</strong>
+					roles. Based in GMT+5:30.
+				</p>
+			</section>
+
+			<div class="ej-ledger" aria-label="Headline metrics">
+				<div class="cell">
+					<div class="figure">11+</div>
+					<div class="caption">Years in platform &amp; SRE</div>
+					<div class="note">Cloud-native infrastructure and team leadership</div>
+				</div>
+				<div class="cell">
+					<div class="figure">100</div>
+					<div class="caption">Kubernetes clusters</div>
+					<div class="note">GitOps provisioning, canary-to-GA waves</div>
+				</div>
+				<div class="cell">
+					<div class="figure">100+</div>
+					<div class="caption">Microservices on the platform</div>
+					<div class="note">Self-service Kubernetes for SaaS scale</div>
+				</div>
+				<div class="cell">
+					<div class="figure">2k+</div>
+					<div class="caption">Compute instances</div>
+					<div class="note">Spot, Graviton, and right-sized node pools</div>
+				</div>
+				<div class="cell">
+					<div class="figure">80%</div>
+					<div class="caption">Faster CI/CD cycles</div>
+					<div class="note">KubeVela · Argo Rollouts · ApplicationSets</div>
+				</div>
+				<div class="cell">
+					<div class="figure">99.8%</div>
+					<div class="caption">Change success rate</div>
+					<div class="note">Progressive delivery with tight blast radius</div>
+				</div>
+			</div>
+
+			<div class="ej-rule" role="presentation">
+				<span class="label"><span class="ord">§ II.</span> &nbsp;Blogs</span>
+				<span class="line"></span>
+				<span class="crosshair">+&nbsp;&nbsp;+&nbsp;&nbsp;+</span>
+			</div>
+
+			<div class="ej-works">
+				<a class="ej-work" href="/blogs/arc-zonal-shift-eks-blog/">
+					<div class="ej-work-no">№ 01</div>
+					<div class="ej-work-body">
+						<div class="ej-work-title">
+							ARC zonal shift on Amazon EKS
+						</div>
+						<p class="ej-work-blurb">
+							ARC zonal shift moves traffic off an impaired Availability Zone in
+							minutes — but EKS data plane, Karpenter, and capacity planning still
+							have to keep up. Preparatory steps, failure modes, and two capacity
+							patterns that work under a shift.
+						</p>
+						<div class="ej-work-meta">
+							<span class="chip signal">EKS</span>
+							<span class="chip">ARC</span>
+							<span class="chip">Karpenter</span>
+							<span class="chip">Resilience</span>
+						</div>
+					</div>
+					<div class="ej-work-arrow">→</div>
+				</a>
+
+				<a class="ej-work" href="/blogs/progressive-delivery-part1/">
+					<div class="ej-work-no">№ 02</div>
+					<div class="ej-work-body">
+						<div class="ej-work-title">
+							Argo Rollouts + AnalysisTemplates <em>~ Release with Confidence</em>
+						</div>
+						<p class="ej-work-blurb">
+							Replace a Kubernetes Deployment with an Argo Rollout CRD, shift traffic
+							in steps, and let Analysis steps decide promote vs abort — metric-gated
+							canaries instead of hope-based rollouts.
+						</p>
+						<div class="ej-work-meta">
+							<span class="chip signal">Argo Rollouts</span>
+							<span class="chip">AnalysisTemplates</span>
+							<span class="chip">Prometheus</span>
+							<span class="chip">Canary</span>
+						</div>
+					</div>
+					<div class="ej-work-arrow">→</div>
+				</a>
+
+				<a class="ej-work" href="/blogs/progressive-delivery-part2/">
+					<div class="ej-work-no">№ 03</div>
+					<div class="ej-work-body">
+						<div class="ej-work-title">
+							Kubevela <em>— the abstraction Dev teams need</em>
+						</div>
+						<p class="ej-work-blurb">
+							Reliable &amp; re-usable application delivery via the Open Application
+							Model. KubeVela gives platform guardrails without forcing every team to
+							hand-write Ingress, Services, and Autoscalers.
+						</p>
+						<div class="ej-work-meta">
+							<span class="chip signal">KubeVela</span>
+							<span class="chip">OAM</span>
+							<span class="chip">Platform</span>
+							<span class="chip">Delivery</span>
+						</div>
+					</div>
+					<div class="ej-work-arrow">→</div>
+				</a>
+			</div>
+
+			<div class="ej-rule" role="presentation">
+				<span class="label"><span class="ord">§ III.</span> &nbsp;Accomplishment</span>
+				<span class="line"></span>
+				<span class="crosshair">+&nbsp;&nbsp;+&nbsp;&nbsp;+</span>
+			</div>
+
+			<div class="ej-practice">
+				{/* Project detail links commented out until Projects section returns */}
+				<div class="item">
+					<h3>EKS &amp; GitOps at scale</h3>
+					<p>
+						Crossplane + Argo CD provisioning, 90-minute cluster setup, canary-to-GA
+						waves that cap blast radius at 10–15 clusters.
+					</p>
+				</div>
+				<div class="item">
+					<h3>FinOps &amp; autoscaling</h3>
+					<p>
+						Karpenter and KEDA for 2–3x surges, scheduling in tens of seconds, ~30%
+						per-core efficiency via Spot and Graviton.
+					</p>
+				</div>
+				<div class="item">
+					<h3>Progressive delivery</h3>
+					<p>
+						80% faster CI/CD with KubeVela, Argo Rollouts, and ApplicationSets. 99.8%
+						change success rate.
+					</p>
+				</div>
+				<div class="item">
+					<h3>Security &amp; supply chain</h3>
+					<p>
+						Kyverno policy-as-code guardrails. Chainguard base images with SBOM support
+						and SLSA provenance.
+					</p>
+				</div>
+				<div class="item">
+					<h3>Reliability &amp; observability</h3>
+					<p>
+						P1 median MTTR under 60 minutes, 35% fewer repeat critical incidents.
+						Prometheus, Grafana, VictoriaMetrics.
+					</p>
+				</div>
+				<div class="item">
+					<h3>Team scaling &amp; mentorship</h3>
+					<p>
+						Structured hiring pipelines and onboarding frameworks so new platform
+						engineers reach productivity faster.
+					</p>
+				</div>
+			</div>
+
+			<footer class="ej-foot">
+				<p class="reach">
+					Open to <em>Platform Engineering / SRE Leadership </em> Roles.
+				</p>
+				<div class="links">
+					<a
+						href="https://www.linkedin.com/in/shankar-ramanathan-a5715b9/"
+						rel="noopener"
+						target="_blank">LinkedIn ↗</a
+					>
+					<a href="https://github.com/calshankar" rel="noopener" target="_blank">GitHub ↗</a>
+					<a href="/techstack/">Tech stack →</a>
+					<a href="/about/">About →</a>
+					{/* <a href="/projects/gitops-eks-scale/">Projects →</a> */}
+					<a href="/blogs/arc-zonal-shift-eks-blog/">Blogs →</a>
+				</div>
+				<div class="meta">
+					Set in <em>Fraunces</em>, <em>IBM Plex Sans</em>, and <em>IBM Plex Mono</em>. Cream
+					paper, cobalt blueprint, cadmium signal. © Shankar Ramanathan — site code MIT.
+				</div>
+			</footer>
+		</main>
+	</body>
+</html>
