@@ -239,3 +239,40 @@ astro.config.mjs                   # Starlight sidebar (Blogs autogenerate / man
 ```
 
 Projects remain commented out in `astro.config.mjs` and on the landing page until re-enabled.
+
+---
+
+## 6. Deploy to GitHub Pages (homepage / index)
+
+Local builds write the real homepage to `dist/index.html` via `src/pages/index.astro`. There is **no** `index.html` in the git repo root — and that is correct.
+
+### Required GitHub setting (most common breakage)
+
+If Pages is set to **Deploy from a branch**, GitHub runs **Jekyll** on the `main` branch. With no root `index.html`, Jekyll serves `README.md` as `/` and every Astro route (`/about/`, `/blogs/…`) 404s. The live HTML will contain `meta name="generator" content="Jekyll …"`.
+
+**Fix:**
+
+1. Repo → **Settings** → **Pages**
+2. Under **Build and deployment** → **Source**, choose **GitHub Actions** (not “Deploy from a branch”)
+3. Push to `main` (or run the **Deploy to GitHub Pages** workflow manually under **Actions**)
+4. Confirm the workflow succeeds, then hard-refresh `https://calshankar.github.io/`
+
+You should then see the Astro landing (“Platform as a product”), not the README.
+
+### What `astro.config.mjs` must have
+
+For this **user site** (`calshankar.github.io`):
+
+```js
+site: 'https://calshankar.github.io',
+// do NOT set `base` — user/org sites publish at the domain root
+```
+
+`base` is only for project sites like `https://user.github.io/repo-name/`.
+
+### What `.github/workflows/deploy.yml` does
+
+Uses the official `withastro/action` to install, `npm run build`, and upload `./dist`, then `actions/deploy-pages` publishes that artifact. It only takes effect after Pages **Source** is **GitHub Actions**.
+
+`public/.nojekyll` is copied into `dist/` so GitHub does not treat `_astro/` as a Jekyll special folder if anything ever falls back to Jekyll processing.
+
