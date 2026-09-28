@@ -594,6 +594,9 @@ Prefer one of the event pattern approach or Argo Events (or a documented sync wa
 
 Event-driven scale-up works best when placeholders or ODCRs already removed the cold EC2 wait. Scaling pods into a Pending queue during ICE only moves the outage into `kubectl get pods`.
 
+>[!TIP]
+>Argo as of Release 3.4.1+ Argo supports pausing [cluster reconciliations](https://argo-cd.readthedocs.io/en/release-3.4/operator-manual/declarative-setup/#skipping-cluster-reconciliation) by adding the annotation argocd.argoproj.io/skip-reconcile: "true" in the cluster secret
+
 ## What EKS and Karpenter do when the shift ends
 
 When the shift expires or is canceled:
