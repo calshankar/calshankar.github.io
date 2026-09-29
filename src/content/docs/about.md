@@ -5,7 +5,7 @@ description: Platform Engineering Leader and SRE Architect with 11+ years scalin
 
 ## About me
 
-I'm a **Platform Engineering Leader and SRE Architect** with 11+ years of experience scaling cloud-native infrastructure and building high-performing platform teams. My recent leadership roles have focused on architecting self-service Kubernetes environments and supporting large-scale SaaS platforms encompassing over 100 microservices, 100 Kubernetes clusters, and 2k+ compute instances.  I specialize in treating the internal platform as a product, driving operational excellence, and aligning technical roadmaps with business, security, and FinOps goals.
+I'm a **Platform Engineering Leader and SRE Architect** with 11+ years of experience scaling cloud-native infrastructure and building high-performing platform teams. My recent leadership roles have focused on architecting self-service Kubernetes environments and supporting large-scale SaaS platforms encompassing over 100 microservices, 100 Kubernetes clusters, and 3k+ compute instances.  I specialize in treating the internal platform as a product, driving operational excellence, and aligning technical roadmaps with business, security, and FinOps goals.
 
 ## About my work
 
