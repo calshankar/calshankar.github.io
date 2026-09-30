@@ -134,12 +134,44 @@ h1#_top {
 	margin-top: 0;
 }
 
-/* Inner page tables — make them feel like printed ledgers */
-:where(.sl-markdown-content) table {
+/*
+ * Inner page tables — ledger look.
+ *
+ * Starlight defaults (markdown.css):
+ *   - table { display: block; overflow: auto }  → block box stretches to content
+ *     column width while the cell grid stays content-sized, so a border on <table>
+ *     leaves empty trailing space after the last column.
+ *   - th/td:first-child { padding-inline-start: 0 } (and last-child end: 0)
+ *     → first column flush against a bordered edge.
+ * Override with enough specificity (avoid :where) so these win.
+ */
+.sl-markdown-content table:not(:where(.not-content *)) {
+	/* Keep block+scroll for wide tables, but shrink-wrap so the border
+	   hugs the cell grid (avoids an empty trailing “ghost column”). */
+	display: block;
+	width: max-content;
+	max-width: 100%;
+	overflow-x: auto;
 	border-collapse: collapse;
+	border-spacing: 0;
 	border: 1px solid var(--rule);
+	box-sizing: border-box;
 }
-:where(.sl-markdown-content) th {
+.sl-markdown-content :is(th, td):not(:where(.not-content *)) {
+	padding: 0.65rem 1rem;
+	border-bottom: 1px solid var(--rule);
+	vertical-align: top;
+	text-align: start;
+	box-sizing: border-box;
+}
+/* Starlight zeroes first/last cell inline padding — restore it for bordered tables */
+.sl-markdown-content :is(th:first-child, td:first-child):not(:where(.not-content *)) {
+	padding-inline-start: 1rem;
+}
+.sl-markdown-content :is(th:last-child, td:last-child):not(:where(.not-content *)) {
+	padding-inline-end: 1rem;
+}
+.sl-markdown-content th:not(:where(.not-content *)) {
 	font-family: var(--sl-font-mono);
 	font-weight: 600;
 	font-size: 0.8em;
@@ -147,10 +179,6 @@ h1#_top {
 	text-transform: uppercase;
 	color: var(--ink-soft);
 	background: var(--paper-deep);
-	border-bottom: 1px solid var(--rule);
-}
-:where(.sl-markdown-content) td {
-	border-bottom: 1px solid var(--rule);
 }
 
 /* Inline code on inner pages */
