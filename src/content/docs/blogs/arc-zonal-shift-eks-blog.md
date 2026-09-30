@@ -195,7 +195,7 @@ I ran a small demo on a 2-AZ cluster (EKS 1.33, Karpenter v1.12.1, Spot NodePool
 **During shift, scale 6 → 12 with `whenUnsatisfiable: DoNotSchedule`:**
 
 | AZ | Pods | Notes |
-| --- | --- | --- |
+|---|---|---|
 | healthy | 4 | 3 original + 1 new |
 | shifted | 3 | Original pods untouched |
 | (pending) | 5 Pending | Next placement would break maxSkew |
@@ -205,7 +205,7 @@ Karpenter launched a node only in the healthy AZ. The scheduler placed one extra
 **Same scale with `ScheduleAnyway`:**
 
 | AZ | Pods |
-| --- | --- |
+|---|---|
 | healthy | 12 |
 | shifted | 0 (or originals still present until a rolling update moves them; traffic no longer targets them) |
 
@@ -219,7 +219,7 @@ kubectl patch deployment zonal-shift-demo --type='json' \
 ```
 
 | Constraint | During AZ failure | Sensible default for |
-| --- | --- | --- |
+|---|---|---|
 | `ScheduleAnyway` | Prefer full availability in healthy AZs | Stateless APIs, web tiers |
 | `DoNotSchedule` | May leave pods Pending to protect skew | Workloads where uneven zone placement is worse than losing replicas |
 | none | Scheduler places freely | Simple apps with other HA mechanisms |
@@ -240,7 +240,7 @@ What actually happens when a shift starts:
 EBS volumes are AZ-scoped. A PVC bound to `us-east-1f` cannot attach to a node in `us-east-1b`. That is an EC2/EBS rule, not something ARC can waive.
 
 | Workload shape | During zonal shift | What to design instead of “ARC will save it” |
-| --- | --- | --- |
+|---|---|---|
 | Deployment + emptyDir / no PVC | New replicas can land in healthy AZs if topology allows | `ScheduleAnyway` + N-1 replica count |
 | Deployment + EBS PVC (unusual) | Pod in shifted AZ stays up but is unreachable via Service; reschedule elsewhere fails attach | Prefer EFS/S3 or replicate data; treat EBS+Deployment as single-AZ |
 | StatefulSet + EBS PVC per ordinal | Ordinals pinned to the shifted AZ stay up locally, leave the Service, cannot recreate on another AZ | Quorum / HA at the app layer (multi-AZ replicas with their own volumes), or accept reduced quorum |
@@ -372,7 +372,7 @@ Karpenter also prioritizes `reserved` first **inside** a single NodePool. So put
 Use **mutual exclusion** (taints / nodeSelectors), not weight tricks:
 
 | Pool | Capacity types | Types | Who may schedule | Job |
-| --- | --- | --- | --- | --- |
+|---|---|---|---|---|
 | `general` | `spot`, `on-demand` | Broad families | Default apps | Cheap diversified compute |
 | `n1-buffer` (Option A) | `on-demand` only | Shapes you want warm | Placeholders only (taint) | Warm seats for preemption |
 | `n1-odcr` (Option B fixed) | `reserved`, then `on-demand` | **ODCR-matched** shapes only | Critical surge only (taint) | Launch insurance under ICE |
@@ -513,7 +513,7 @@ So: placeholders select buffer. A small critical set selects ODCR. Default apps 
 Use **both** a `NoSchedule` taint on the extra pools and a required affinity on pods that *belong* there.
 
 | If you only set… | What can go wrong |
-| --- | --- |
+|---|---|
 | Taint + toleration, no selector | Any pod that copies the toleration (or uses `Exists` on that key) can land on buffer/ODCR and burn the insurance. |
 | Selector, no taint | Untainted `general` nodes/Node Pools also have no `capacity-purpose` label, so the selector keeps accidental guests off extra pools. But pods *without* the selector can still schedule onto extra-pool nodes if those nodes are untainted. Taint is what keeps the default app off `n1-buffer` / `n1-odcr`. |
 | Neither | Karpenter treats the pools as overlapping. Highest weight wins. ODCR and warm nodes get used as a random extra `general`. |
@@ -591,7 +591,7 @@ Patterns and examples: [Using zonal autoshift with EventBridge](https://docs.aws
 On a cluster that already has HPA, Argo CD, and Crossplane, sensible patterns look like this:
 
 | Pattern | What it does | Trade-off |
-| --- | --- | --- |
+|---|---|---|
 | EventBridge → CloudWatch metric → KEDA | Bump `minReplicaCount` when a shift metric flips | Simple; CloudWatch + poll latency; no in-cluster API mutation from AWS |
 | EventBridge → SQS → KEDA | Faster queue-length signal than metrics | Still pod-only; needs queue hygiene when the shift ends |
 | EventBridge → SQS/SNS → Argo Events Sensor | Patch HPA / Deployment inside the cluster; keeps GitOps boundaries | More moving parts; Sensors must reconcile with Argo CD ownership |
@@ -665,7 +665,7 @@ Do **not** enable `LowNodeUtilization` (or similar consolidation plugins) next t
 ### Tradeoffs
 
 | Approach | What you get | What you pay |
-| --- | --- | --- |
+|---|---|---|
 | Manual `kubectl rollout restart` per Deployment | Predictable, human-gated | Operational toil at fleet scale; easy to miss namespaces; big blast radius if you restart everything at once |
 | Descheduler + soft spread + PDBs | Continuous correction toward `maxSkew`; PDB-throttled concurrency; `maxNoOfPodsToEvictPerNamespace` caps volume per run | Every correction is a pod restart (connections drop, caches cold); slow-starting apps widen the unready window; PDBs limit concurrency, they do not remove disruption |
 | Hard `DoNotSchedule` only | Skew never forms | During the next shift you may Pending pods instead of serving; that is a different outage shape |
@@ -681,7 +681,7 @@ You do **not** want topology rebalance while ARC is still steering traffic off a
 Descheduler is setup as CronJob in suspended mode after zonal shift. If you need live Descheduler metrics,  the recommended mode is Deployment.
 
 | Control | How | Honest limit |
-| --- | --- | --- |
+|---|---|---|
 | **Suspend the CronJob** | `kubectl -n kube-system patch cronjob descheduler -p '{"spec":{"suspend":true}}'` (or Helm `--set suspend=true`). AWS’s operating guidance: pause during planned capacity drains and cluster upgrades. Same idea for an active shift. | Best on/off switch for CronJob installs. You must unsuspend after the shift, or skew never heals. |
 | **EventBridge → suspend / unsuspend** | On `Manual Shift Started` / `Autoshift In Progress` / `Practice Run Started`, suspend. On `Manual Shift Canceled` / `Autoshift Completed` / practice terminal events, unsuspend (optionally after a short soak so the AZ is schedulable). Wire the same ARC EventBridge patterns you already use for HPA floors. | The descheduler post does not ship this wiring. You compose ARC events with CronJob suspend. Test the unsuspend path; a stuck `suspend: true` is a silent config bug. |
 | **`topologyBalanceNodeFit: true` + `nodeFit: true`** | Skips evictions when no better Ready, schedulable node exists (cordoned / full / affinity-blocked). | Necessary safety, **not** a full pause. In AWS’s cordoned-zone pass, the Descheduler still evict pods that *could* fit among surviving zones. During a real shift that means it can still disrupt healthy-AZ capacity. |
@@ -705,7 +705,7 @@ Also scope with `namespaces.include` / `namespaces.exclude` on `RemovePodsViolat
 For a **specific** Pod or Pod template that still matches your policy, Descheduler supports two annotations. Read them carefully; they are not mirrors of each other:
 
 | Annotation | Effect |
-| --- | --- |
+|---|---|
 | `descheduler.alpha.kubernetes.io/prefer-no-eviction` | Pod prefers not to be evicted. Honored as a hard exclude only when DefaultEvictor sets `noEvictionPolicy: Mandatory` (default policy treats it as preferred). |
 | `descheduler.alpha.kubernetes.io/evict` | **Opt-in / override**, not a disable switch. Presence makes the pod eligible and bypasses several internal “do not evict” checks. Do **not** set `evict: "false"` expecting protection; any value is treated as eligible. |
 
