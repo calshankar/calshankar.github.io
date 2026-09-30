@@ -14,7 +14,10 @@ Glossary:
 
 ARC zonal shift on Amazon EKS moves traffic off an impaired Availability Zone in minutes. It does not magically create capacity in the zones that remain. If your workloads, HPA targets, and Karpenter NodePools were sized for three healthy AZs, a shift leaves you fighting a race: traffic arrives in the healthy zones before pods and nodes catch up.
 
-This guide is for platform and SRE teams who already run Karpenter, HPA and other platform controllers on EKS, and now need to enable ARC zonal shift without pretending the rest of the stack will “just work.” I’ll cover what EKS and Karpenter do natively, a concrete enable-and-test path, how topology and stateful PVCs behave under a shift, and an honest take on two capacity patterns: low-priority On-Demand placeholders (Option A) and ODCR-backed NodePools (Option B).
+This guide is for platform and SRE teams who already run Karpenter, HPA and other platform controllers on EKS, and now need to enable ARC zonal shift without pretending the rest of the stack will “just work.” I’ll cover what EKS and Karpenter do natively, a concrete enable-and-test path, how topology and stateful PVCs behave under a shift, an honest take on two capacity patterns (low-priority On-Demand placeholders and ODCR-backed NodePools), and how the Kubernetes Descheduler can fix the AZ skew that stays behind after the shift ends.
+
+>[!WARNING]
+> "This post is 700+ line long because everything is connected or that is what I thought 😂. I refuse to leave you with half a puzzle. Consider this your official invitation to stretch your legs, refill your coffee/snacks, and prepare for a deep dive."
 
 ## Who this is for
 
@@ -164,6 +167,7 @@ aws arc-zonal-shift start-zonal-shift \
   --comment "Practice: validate Karpenter and topology under zonal shift" \
   --region "${AWS_REGION}"
 ```
+
 **NOTE**: You must provide the AZ ID ( use1-az5), not the name ( us-east-1f)
 
 Wait at least ~60 seconds between shift operations. EKS polls zonal state; rapid flip-flops can be processed incorrectly.
@@ -177,9 +181,11 @@ kubectl get nodeclaims -o wide
 ```
 
 You should see new NodeClaims only in healthy AZs. Nodes already in the shifted AZ stay up; Karpenter will not consolidate or drift them away while the shift depends on that AZ. Cancel or let the shift expire when you are done.
+
 ```yaml
 Important Note: *Pods do not rebalance by themselves after zonal-shift*. A rollout restart (or the next deploy / Karpenter consolidation after the AZ is healthy again) is what spreads them back.
 ```
+
 ## Topology spread is the footgun: DoNotSchedule vs ScheduleAnyway
 
 I ran a small demo on a 2-AZ cluster (EKS 1.33, Karpenter v1.12.1, Spot NodePool across both AZs) with six nginx replicas and `maxSkew: 1`.
@@ -189,7 +195,7 @@ I ran a small demo on a 2-AZ cluster (EKS 1.33, Karpenter v1.12.1, Spot NodePool
 **During shift, scale 6 → 12 with `whenUnsatisfiable: DoNotSchedule`:**
 
 | AZ | Pods | Notes |
-|---|---|---|
+| --- | --- | --- |
 | healthy | 4 | 3 original + 1 new |
 | shifted | 3 | Original pods untouched |
 | (pending) | 5 Pending | Next placement would break maxSkew |
@@ -199,7 +205,7 @@ Karpenter launched a node only in the healthy AZ. The scheduler placed one extra
 **Same scale with `ScheduleAnyway`:**
 
 | AZ | Pods |
-|---|---|
+| --- | --- |
 | healthy | 12 |
 | shifted | 0 (or originals still present until a rolling update moves them; traffic no longer targets them) |
 
@@ -213,7 +219,7 @@ kubectl patch deployment zonal-shift-demo --type='json' \
 ```
 
 | Constraint | During AZ failure | Sensible default for |
-|---|---|---|
+| --- | --- | --- |
 | `ScheduleAnyway` | Prefer full availability in healthy AZs | Stateless APIs, web tiers |
 | `DoNotSchedule` | May leave pods Pending to protect skew | Workloads where uneven zone placement is worse than losing replicas |
 | none | Scheduler places freely | Simple apps with other HA mechanisms |
@@ -234,7 +240,7 @@ What actually happens when a shift starts:
 EBS volumes are AZ-scoped. A PVC bound to `us-east-1f` cannot attach to a node in `us-east-1b`. That is an EC2/EBS rule, not something ARC can waive.
 
 | Workload shape | During zonal shift | What to design instead of “ARC will save it” |
-|---|---|---|
+| --- | --- | --- |
 | Deployment + emptyDir / no PVC | New replicas can land in healthy AZs if topology allows | `ScheduleAnyway` + N-1 replica count |
 | Deployment + EBS PVC (unusual) | Pod in shifted AZ stays up but is unreachable via Service; reschedule elsewhere fails attach | Prefer EFS/S3 or replicate data; treat EBS+Deployment as single-AZ |
 | StatefulSet + EBS PVC per ordinal | Ordinals pinned to the shifted AZ stay up locally, leave the Service, cannot recreate on another AZ | Quorum / HA at the app layer (multi-AZ replicas with their own volumes), or accept reduced quorum |
@@ -366,7 +372,7 @@ Karpenter also prioritizes `reserved` first **inside** a single NodePool. So put
 Use **mutual exclusion** (taints / nodeSelectors), not weight tricks:
 
 | Pool | Capacity types | Types | Who may schedule | Job |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | `general` | `spot`, `on-demand` | Broad families | Default apps | Cheap diversified compute |
 | `n1-buffer` (Option A) | `on-demand` only | Shapes you want warm | Placeholders only (taint) | Warm seats for preemption |
 | `n1-odcr` (Option B fixed) | `reserved`, then `on-demand` | **ODCR-matched** shapes only | Critical surge only (taint) | Launch insurance under ICE |
@@ -507,7 +513,7 @@ So: placeholders select buffer. A small critical set selects ODCR. Default apps 
 Use **both** a `NoSchedule` taint on the extra pools and a required affinity on pods that *belong* there.
 
 | If you only set… | What can go wrong |
-|---|---|
+| --- | --- |
 | Taint + toleration, no selector | Any pod that copies the toleration (or uses `Exists` on that key) can land on buffer/ODCR and burn the insurance. |
 | Selector, no taint | Untainted `general` nodes/Node Pools also have no `capacity-purpose` label, so the selector keeps accidental guests off extra pools. But pods *without* the selector can still schedule onto extra-pool nodes if those nodes are untainted. Taint is what keeps the default app off `n1-buffer` / `n1-odcr`. |
 | Neither | Karpenter treats the pools as overlapping. Highest weight wins. ODCR and warm nodes get used as a random extra `general`. |
@@ -545,7 +551,7 @@ spec:
 
 - **Always-on.** The Deployment always selects `n1-odcr`. You will consume some reservation in peacetime. Unused ODCR that no workload can select is wasted money.
 
- The ₹ Workload that tolerates General + n1-odcr in advance` only works as ICE insurance if you also pin with **nodeSelector/affinity** on **capacity-purpose=n1-odcr** (or an equivalent exclusive constraint).` Toleration alone is not enough`.
+ The ₹ Workload that tolerates General + n1-odcr in advance`only works as ICE insurance if you also pin with **nodeSelector/affinity** on **capacity-purpose=n1-odcr** (or an equivalent exclusive constraint).` Toleration alone is not enough`.
 
 - **Shift-gated option.** Peacetime spec matches `general` only. On `Manual Shift Started` / `Autoshift In Progress` / practice-run, a practiced Argo Events (or similar) patch adds the `n1-odcr` selector and toleration. If that patch is untested, the pool stays idle while the app Pendings, which is the failure mode Option B’s weight trick also produced.
 
@@ -585,7 +591,7 @@ Patterns and examples: [Using zonal autoshift with EventBridge](https://docs.aws
 On a cluster that already has HPA, Argo CD, and Crossplane, sensible patterns look like this:
 
 | Pattern | What it does | Trade-off |
-|---|---|---|
+| --- | --- | --- |
 | EventBridge → CloudWatch metric → KEDA | Bump `minReplicaCount` when a shift metric flips | Simple; CloudWatch + poll latency; no in-cluster API mutation from AWS |
 | EventBridge → SQS → KEDA | Faster queue-length signal than metrics | Still pod-only; needs queue hygiene when the shift ends |
 | EventBridge → SQS/SNS → Argo Events Sensor | Patch HPA / Deployment inside the cluster; keeps GitOps boundaries | More moving parts; Sensors must reconcile with Argo CD ownership |
@@ -605,7 +611,111 @@ When the shift expires or is canceled:
 - Karpenter resumes normal provisioning and voluntary disruption
 - Workloads gradually return as pods recycle; they do not snap back to even skew
 
-Plan the rebalance: rollout restart for critical Deployments, or accept skew until the next deploy. Switching topology constraints mid-incident without a restart will confuse you during post-incident review.
+The recovered AZ comes back empty of *your* steady-state pods unless something creates new ones there. HPA churn can slowly refill it. Deployments pinned at a stable replica count stay skewed until you restart them, or until something like the Descheduler evicts the extras in the overloaded zones.
+
+Plan the rebalance on purpose: Descheduler for soft topology drift (below), a targeted rollout restart for critical Deployments, or accept skew until the next deploy. Switching topology constraints mid-incident without a restart will confuse you during post-incident review.
+
+## How Descheduler fixes the AZ skew a zonal shift leaves behind
+>[!NOTE]
+>De-scheduler  make sense only if substantial fraction of your workload is in violation of Topology constraint set and sustained skew is observed after the Zonal Shift end. Usually ~ 20-25% of skew auto corrects over-time.
+
+[Descheduler](https://github.com/kubernetes-sigs/descheduler/blob/release-1.36/README.md#removepodsviolatingtopologyspreadconstraint) aims to address the same failure mode you hit after a shift: soft `topologySpreadConstraints` (`whenUnsatisfiable: ScheduleAnyway`) let the scheduler pack surviving zones during a node-availability gap, then **nothing in core Kubernetes moves running pods** once capacity returns. The workloads can hold the skew for hours together with every node healthy again in the shifted AZ. Workloads that keep churning recover by accident. Workloads at steady state keep the shape the gap gave them.
+
+When the shift ends, the impaired AZ uncordons, but the pods that piled into the other zones stay put. Your manifests still claim `maxSkew: 1`. The running fleet does not.
+
+### The plugin that matters for AZ rebalance
+
+The Descheduler does not place pods. It runs on a periodic loop, evaluates a policy, **evicts** violators through the Eviction API (so PDBs apply), and lets kube-scheduler place the replacements.
+
+For topology / AZ drift, the relevant plugin is `RemovePodsViolatingTopologySpreadConstraint`. Defaults only act on hard constraints (`DoNotSchedule`). Most production APIs on this stack use soft spread, so you must list `ScheduleAnyway` in the plugin’s `constraints` or the Descheduler will ignore the skew you care about:
+
+```yaml
+deschedulerPolicy:
+  maxNoOfPodsToEvictPerNamespace: 5  # volume cap per run; tune to namespace size
+  profiles:
+    - name: rebalance-topology
+      pluginConfig:
+        - name: RemovePodsViolatingTopologySpreadConstraint
+          args:
+            constraints:
+              - DoNotSchedule
+              - ScheduleAnyway  # required for soft spread used during zonal shift
+            namespaces:
+              include:
+                - apps  # start with narrow target
+            topologyBalanceNodeFit: true  # skip eviction if no better node exists
+        - name: DefaultEvictor
+          args:
+            evictSystemCriticalPods: false  # leave system-critical priority alone
+            evictLocalStoragePods: false    # skip emptyDir / local-storage pods
+            ignorePvcPods: true             # skip PVC-backed pods (StatefulSet + EBS)
+            nodeFit: true
+            priorityThreshold:
+              value: 10000                  # do not evict at or above this priority
+      plugins:
+        balance:
+          enabled:
+            - RemovePodsViolatingTopologySpreadConstraint
+```
+
+`topologyBalanceNodeFit: true` (plugin arg) and `nodeFit: true` (DefaultEvictor) are the safety rails that refuse an eviction when the only domain that would fix skew is still unschedulable. In the AWS measurement, while one AZ stayed cordoned, the Descheduler logged “ignoring pod for eviction as it does not fit on any other node” and skipped the pods whose only legal destination was that zone.
+
+Do **not** enable `LowNodeUtilization` (or similar consolidation plugins) next to the topology plugin on day one. One spreads pods across zones; the other packs them onto fewer nodes. Together they can oscillate, and on a Karpenter cluster that already consolidates, you get competing movers, which essentially means more 🎇 🧨
+
+### Tradeoffs
+
+| Approach | What you get | What you pay |
+| --- | --- | --- |
+| Manual `kubectl rollout restart` per Deployment | Predictable, human-gated | Operational toil at fleet scale; easy to miss namespaces; big blast radius if you restart everything at once |
+| Descheduler + soft spread + PDBs | Continuous correction toward `maxSkew`; PDB-throttled concurrency; `maxNoOfPodsToEvictPerNamespace` caps volume per run | Every correction is a pod restart (connections drop, caches cold); slow-starting apps widen the unready window; PDBs limit concurrency, they do not remove disruption |
+| Hard `DoNotSchedule` only | Skew never forms | During the next shift you may Pending pods instead of serving; that is a different outage shape |
+
+Descheduler also interacts with Karpenter. Evictions free nodes in overloaded AZs and create Pending pods that prefer the underloaded AZ. Karpenter may launch there, then later consolidate elsewhere. That is useful after a shift, and noisy if both controllers thrash. Keep eviction caps modest, keep PDBs sized for N-1, and treat Descheduler as a balance tool, not a substitute for static stability.
+
+Trial & error excercise is required to get the setting right since many pods may not scale as fast you expect. Scale `maxNoOfPodsToEvictPerNamespace` down and PDB headroom up until practice runs look boring.
+
+## Keep Descheduler from acting during an active zonal shift
+
+You do **not** want topology rebalance while ARC is still steering traffic off an AZ. Healthy zones are already absorbing load. Extra evictions there buy you restarts in the middle of the incident, and some “rebalance among survivors” work is useless once the third AZ returns.
+
+Descheduler is setup as CronJob in suspended mode after zonal shift. If you need live Descheduler metrics,  the recommended mode is Deployment.
+
+| Control | How | Honest limit |
+| --- | --- | --- |
+| **Suspend the CronJob** | `kubectl -n kube-system patch cronjob descheduler -p '{"spec":{"suspend":true}}'` (or Helm `--set suspend=true`). AWS’s operating guidance: pause during planned capacity drains and cluster upgrades. Same idea for an active shift. | Best on/off switch for CronJob installs. You must unsuspend after the shift, or skew never heals. |
+| **EventBridge → suspend / unsuspend** | On `Manual Shift Started` / `Autoshift In Progress` / `Practice Run Started`, suspend. On `Manual Shift Canceled` / `Autoshift Completed` / practice terminal events, unsuspend (optionally after a short soak so the AZ is schedulable). Wire the same ARC EventBridge patterns you already use for HPA floors. | The descheduler post does not ship this wiring. You compose ARC events with CronJob suspend. Test the unsuspend path; a stuck `suspend: true` is a silent config bug. |
+| **`topologyBalanceNodeFit: true` + `nodeFit: true`** | Skips evictions when no better Ready, schedulable node exists (cordoned / full / affinity-blocked). | Necessary safety, **not** a full pause. In AWS’s cordoned-zone pass, the Descheduler still evict pods that *could* fit among surviving zones. During a real shift that means it can still disrupt healthy-AZ capacity. |
+| **Cron schedule only** | Longer intervals (`*/15` or more in production). Quiet/Off peak hour schedules sound safe. | Quiet hours are often `minReplicas`, where percentage PDBs are weakest and skew has an arithmetic floor. Schedule alone does not know about ARC. |
+| **Namespace / label scope** | `namespaces.include` on the topology plugin; DefaultEvictor `labelSelector` / `namespaceLabelSelector`. | Shrinks blast radius. Does not stop in-scope apps from being evicted mid-shift. |
+
+What does **not** work as a shift gate:
+
+- Hoping soft spread “waits until the AZ is back.” Soft spread only scores *new* pods.
+- Relying on PDBs alone. PDBs throttle concurrent disruption; they do not know you are in an ARC event.
+- Expecting Karpenter’s zonal-shift awareness to pause Descheduler. Karpenter stops provisioning / voluntary disruption in the shifted AZ. Descheduler is a separate controller.
+
+Practical default on this stack: CronJob Descheduler with `topologyBalanceNodeFit: true`, **suspended for the whole active shift** via the same EventBridge → Argo Events (or equivalent) path you use for scale-up, then unsuspended after cancel/expiry once nodes in the recovered AZ are Ready and unschedulable is clear.
+
+## Permanently keep Descheduler off certain workloads
+
+Some pods should never be part of topology rebalance. Prometheus (or any StatefulSet on EBS), singletons, and anything that cannot restart cheaply belong on the deny list. The Descheduler `DefaultEvictor` policy setting ignores rebalancing but it is not a magic wand.
+
+Also scope with `namespaces.include` / `namespaces.exclude` on `RemovePodsViolatingTopologySpreadConstraint` so that any critical namespaces never enter the balance plugin.
+
+For a **specific** Pod or Pod template that still matches your policy, Descheduler supports two annotations. Read them carefully; they are not mirrors of each other:
+
+| Annotation | Effect |
+| --- | --- |
+| `descheduler.alpha.kubernetes.io/prefer-no-eviction` | Pod prefers not to be evicted. Honored as a hard exclude only when DefaultEvictor sets `noEvictionPolicy: Mandatory` (default policy treats it as preferred). |
+| `descheduler.alpha.kubernetes.io/evict` | **Opt-in / override**, not a disable switch. Presence makes the pod eligible and bypasses several internal “do not evict” checks. Do **not** set `evict: "false"` expecting protection; any value is treated as eligible. |
+
+Good exclude candidates on an ARC-enabled cluster:
+
+- Prometheus / Thanos / any StatefulSet with EBS (zone-bound; eviction cannot create capacity in another AZ)
+- In-cluster databases and queue leaders that lose quorum on restart
+- Low-replica Deployments where a percentage PDB rounds up and one eviction is half the fleet (use absolute PDB values below ~10 replicas, or exclude them)
+
+Descheduler is for restartable, multi-replica, soft-spread apps. It is not how you “move” an EBS-backed workloads (For Ex: Prometheus shard) after a shift. That still needs the data-plane HA pattern in the stateful section above.
 
 ## Practice runs are the real operational control
 
@@ -619,6 +729,7 @@ Weekly practice runs are required for zonal autoshift. Wire EventBridge notifica
 4. Whether CoreDNS / platform controllers stayed Ready (spread and scale them like apps)
 5. Whether Platform and Application workloads control planes lost quorum or Pending on PVC attach
 6. Whether placeholder preemption and/or ODCR-backed NodeClaims covered the surge without ICE
+7. Whether Descheduler stayed suspended for the active shift, then restored per-AZ skew afterward without evicting PVC / prefer-no-eviction workloads
 
 You can also validate with AWS FIS using `aws:arc:start-zonal-autoshift` if you want chaos tooling instead of a console click.
 
@@ -636,6 +747,7 @@ You can also validate with AWS FIS using `aws:arc:start-zonal-autoshift` if you 
 - **ODCR without NodeClass selection:** With native Karpenter ODCR support enabled, open reservations are not magically consumed; they must appear in `capacityReservationSelectorTerms`, and some exclusive NodePool must allow `karpenter.sh/capacity-type: reserved`.
 - **ALB/NLB:** Register load balancers with ARC separately if north-south traffic must also leave the AZ; cluster shift alone does not replace ELB zonal shift for every ingress pattern.
 - **Interdependent apps without pod affinity:** Spreading unrelated tiers across AZs without colocating call chains can turn one AZ loss into an end-to-end outage even if each Deployment has replicas elsewhere.
+- **Descheduler during an active shift:** Ideally `topologyBalanceNodeFit` skips moves into a cordoned AZ, but can still evict among healthy zones. Suspend the CronJob for the shift; unsuspend after recovery. PVC / prefer-no-eviction workloads stay out of scope.
 
 ## Checklist before the first production practice run
 
@@ -651,7 +763,9 @@ You can also validate with AWS FIS using `aws:arc:start-zonal-autoshift` if you 
 - [ ] PDBs sized for N-1 (prefer `maxUnavailable`); placeholders without a blocking PDB; no assumption that PDB restores shifted traffic
 - [ ] EventBridge alerts for practice / autoshift outcomes (optional)
 - [ ] Argo CD ownership rules for any emergency HPA or ODCR-toleration patches (optional)
-- [ ] Rebalance procedure after shift ends (restart / deploy) that will not deadlock on PDBs
+- [ ] Rebalance procedure after shift ends: **Check descheduler action is warranted**, Descheduler (soft spread + `ScheduleAnyway` in plugin constraints) and/or targeted rollout restart, sized so PDBs do not deadlock the drain
+- [ ] If using Descheduler : CronJob suspend for active ARC shifts; `topologyBalanceNodeFit: true` + `nodeFit: true`; `ignorePvcPods: true`; exclude volume backed workloads (namespace and/or `descheduler.alpha.kubernetes.io/prefer-no-eviction` with `noEvictionPolicy: Mandatory`)
+- [ ] Do not pair topology Descheduler with `LowNodeUtilization` until PDBs and Karpenter consolidation behavior are proven stable
 
 ## Try this next
 
@@ -660,6 +774,7 @@ You can also validate with AWS FIS using `aws:arc:start-zonal-autoshift` if you 
 3. During the same practice window, bounce a PVC-backed Prometheus (or similar) pod in the shifted AZ and watch it Pending on volume topology. Decide whether remote write / multi-AZ replicas are enough before you enable autoshift.
 4. If you use Option A / Option B, verify under a practice shift: placeholders preempt; `n1-odcr` NodeClaims show `capacity-type=reserved` for critical pods that tolerate the taint; ODCR is not sitting unused while general churns ICE. Docs: [Karpenter ODCR](https://karpenter.sh/docs/tasks/odcrs/), [EC2 Capacity Reservations](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-capacity-reservations.html), [NodePools](https://karpenter.sh/docs/concepts/nodepools/).
 5. Drain one healthy-AZ node during a practice shift and confirm PDBs still allow eviction at N-1 replica counts. If drain blocks, loosen `minAvailable` / switch to `maxUnavailable` before autoshift.
-6. Read [Learn about ARC zonal shift in Amazon EKS](https://docs.aws.amazon.com/eks/latest/userguide/zone-shift.html) end to end, understand the exact controller behaviors then configure a practice run before you turn on autoshift.
+6. After the practice shift ends, leave one soft-spread Deployment skewed on purpose, then run a suspended-CronJob Descheduler pass (`RemovePodsViolatingTopologySpreadConstraint` with `ScheduleAnyway`) and confirm it converges without touching PVC / prefer-no-eviction workloads.
+7. Read [Learn about ARC zonal shift in Amazon EKS](https://docs.aws.amazon.com/eks/latest/userguide/zone-shift.html) end to end, understand the exact controller behaviors then configure a practice run before you turn on autoshift.
 
 If the practice run fails because you ran out of Ready pods in healthy AZs, that is the feature working as designed. Fix capacity and topology before you let AWS autoshift production for you.
