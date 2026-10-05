@@ -1,4 +1,5 @@
 // @ts-check
+import mermaid from 'astro-mermaid';
 import starlight from '@astrojs/starlight';
 import { defineConfig } from 'astro/config';
 
@@ -6,6 +7,11 @@ import { defineConfig } from 'astro/config';
 export default defineConfig({
 	site: 'https://calshankar.github.io',
 	integrations: [
+		// Must come BEFORE starlight so ```mermaid fences are transformed
+		mermaid({
+			theme: 'neutral',
+			autoTheme: true,
+		}),
 		starlight({
 			title: 'Shankar Ramanathan',
 			description:

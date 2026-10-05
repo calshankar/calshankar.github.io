@@ -121,17 +121,33 @@ h1#_top {
  * and sets the h2 to display:inline so the anchor sits on the same line.
  * A border-bottom on the inline h2 only underlines the text box (and padding for the
  * icon), so lines look short / uneven. Put the rule on the full-width wrapper instead.
+ *
+ * Spacing: trim ~35% off the default top gap and underline padding so ## / ###
+ * blocks don’t leave a large empty band under the heading text.
  */
-:where(.sl-markdown-content) .sl-heading-wrapper.level-h2 {
+.sl-markdown-content .sl-heading-wrapper.level-h2:not(:where(.not-content *)) {
 	border-bottom: 1px solid var(--rule);
-	padding-bottom: 0.4em;
-	margin-top: 2.6em;
+	padding-bottom: 0.25em;   /* was 0.4em */
+	margin-top: 1.7em;        /* was 2.6em (~35% less) */
+	margin-bottom: 0.35em;
 }
-:where(.sl-markdown-content) .sl-heading-wrapper.level-h2 > :first-child {
-	/* Clear any leftover underline if an older rule targeted h2 directly */
+.sl-markdown-content .sl-heading-wrapper.level-h3:not(:where(.not-content *)) {
+	margin-top: 1em;          /* Starlight default sibling gap is 1.5em */
+	margin-bottom: 0.25em;
+	padding-bottom: 0;
+}
+.sl-markdown-content .sl-heading-wrapper.level-h2 > :first-child,
+.sl-markdown-content .sl-heading-wrapper.level-h3 > :first-child {
 	border-bottom: none;
 	padding-bottom: 0;
 	margin-top: 0;
+	margin-bottom: 0;
+}
+/* Tighten Starlight’s “previous block + heading” gap for ### (## uses rule above) */
+.sl-markdown-content
+	:not(h1, h2, h3, h4, h5, h6, .sl-heading-wrapper)
+	+ .sl-heading-wrapper.level-h3 {
+	margin-top: 1em;
 }
 
 /*
@@ -558,19 +574,23 @@ ul.top-level li > details > summary {
 }
 .ej-work:hover .ej-work-arrow { transform: translateX(4px); color: var(--cadmium); }
 
-/* Practice list — two-column with rule */
+/* Practice / Accomplishment — vertical rules need air on both sides of the text */
 .ej-practice {
 	display: grid;
 	grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
 	gap: 0;
 }
 .ej-practice .item {
-	padding: 1.4rem 1.5rem 1.4rem 0;
+	/* Was padding-right only; next column sat flush against the rule */
+	padding: 1.4rem 1.75rem 1.4rem 1.25rem;
 	border-right: 1px solid var(--rule);
 	text-decoration: none;
 	color: inherit;
 	display: block;
 	transition: background 0.25s ease, padding-left 0.25s ease;
+}
+.ej-practice .item:first-child {
+	padding-left: 0;
 }
 .ej-practice a.item:hover {
 	background: linear-gradient(90deg, var(--paper-deep) 0%, transparent 100%);
