@@ -2,7 +2,7 @@
 title: Kubevela the Abstraction Dev team needs for a Reliable & Re-usable Application Delivery - Part2
 description: The Open Application Model (OAM) is the abstraction layer for easier and flexible onboarding of K8s native applications with Platform Gaurd Rails.
 sidebar:
-  order: 3
+  order: 4
 ---
 
 **🚧 UNDER CONSTRUCTION 🚧**

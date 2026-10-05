@@ -2,7 +2,7 @@
 title: Right-sizing with Karpenter and KEDA
 description: Placeholder blog post on cost and latency from node and pod autoscaling.
 sidebar:
-  order: 4
+  order: 5
 ---
 **🚧 UNDER CONSTRUCTION 🚧**
 
