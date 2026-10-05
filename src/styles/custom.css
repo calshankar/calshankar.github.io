@@ -49,6 +49,13 @@
 	--sl-color-hairline:        var(--rule);
 	--sl-color-hairline-light:  var(--rule);
 	--sl-color-hairline-shade:  var(--rule);
+
+	/*
+	 * Main article column (blogs / about / techstack).
+	 * Starlight default is 45rem — widen for less vertical scrolling on long posts
+	 * while keeping a readable measure for prose (~60rem ≈ 960px).
+	 */
+	--sl-content-width: 60rem;
 }
 
 :root[data-theme='dark'] {
