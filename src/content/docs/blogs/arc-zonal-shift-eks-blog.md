@@ -8,7 +8,6 @@ sidebar:
 **By Shankar Ramanathan**
 
 Glossary:
-
 - ICE - Insufficient capacity error
 - ODCR - On-Demand Capacity Reservations
 

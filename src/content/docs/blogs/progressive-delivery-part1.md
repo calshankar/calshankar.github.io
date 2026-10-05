@@ -2,7 +2,7 @@
 title: Argo Rollouts + AnalysisTemplates ~ Release with Confidence - Part1
 description: Replace a Kubernetes Deployment with an Argo Rollout CRD, shift traffic in steps, and let Analysis steps decide promote vs abort.
 sidebar:
-  order: 2
+  order: 3
 ---
 
 *By Shankar Ramanathan*
