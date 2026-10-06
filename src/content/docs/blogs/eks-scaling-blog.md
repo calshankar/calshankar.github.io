@@ -194,8 +194,21 @@ Output:
 apiserver_storage_size_bytes{endpoint="http://10.0.160.16:2379"} 7.210830848e+09
 apiserver_storage_size_bytes{endpoint="http://10.0.32.16:2379"} 7.207840768e+09
 apiserver_storage_size_bytes{endpoint="http://10.0.96.16:2379"} 7.208852480e+09
-```
+
 If that number approaches 8.0e+09 (8 GB), your cluster normal operation can be interrupted 🧨.
+
+You can also run a check on total number of objects stored in ETCD which can also contribute towards the limit. The API server exposes metrics that lists the object count by resource type
+
+```bash
+kubectl get --raw=/metrics | grep apiserver_storage_objects |awk '$2>300' |sort -g -k 2
+```
+It is extremely important to watch the metric `apiserver_storage_objects` and setup alerting to avoid getting into an incident. Here is a configuration that you can use to integrate your alerts with your Alerting platf rm. Refer the [Alerting section](#1.-alert-on-excessive-growth)
+
+>[!IMPORTANT]
+<br>
+> If your cluster breaches the ETCD storage space threshold 8GB then the cluster will get locked out and reach stalemate state with the CRUD operations.
+<br>
+>You won't be able to resolve the issue until AWS supports directly remove objects from ETCD storage which could take hours of back & forth with AWS support team and Approval chain
 
 ### Debugging with CloudWatch Insights
 
@@ -357,23 +370,68 @@ Whether you are running 50 nodes or 5,000, you cannot ignore control plane hygie
 
 ### 1. Alert on excessive growth
 
-Deploy Prometheus and configure the `etcdExcessiveDatabaseGrowth` alert rule. Do not wait for the EKS dashboard to turn red.
-
-```yaml
-groups:
-- name: etcd-alerts
-  rules:
-  - alert: etcdExcessiveDatabaseGrowth
-    expr: rate(apiserver_storage_size_bytes[1h]) > 1048576  # 1 MB/s growth
-    for: 10m
-    labels:
-      severity: warning
-    annotations:
-      summary: "etcd database size is growing rapidly"
-      description: "Database is growing at >1MB/s. Check API server audit logs for high mutation rates."
-```
+Deploy Prometheus and configure the `etcdExcessiveDatabaseGrowth` alert rule. Do not wait for the EKS dashboard to turn red. Test your alerts & change the alerting configuration as required.
 
 If this alert triggers, check the `apiserver_storage_object_counts` metric to identify which resource type is causing the bloat.
+```yaml
+groups:
+  - name: kubernetes-apiserver-etcd-storage
+    rules:
+      # 1. CRITICAL: Etcd approaching the 8GB hard quota limit
+      - alert: KubeEtcdDatabaseQuotaApproachingLimit
+        expr: (etcd_mvcc_db_total_size_in_bytes / 8589934592) * 100 > 85
+        for: 5m
+        labels:
+          severity: critical
+          tier: control-plane
+          priority: P1
+        annotations:
+          summary: "CRITICAL: etcd database is over 85% of its 8GB quota"
+          description: "The physical etcd database size is currently at {{ printf \"%.2f\" $value }}% of the 8GB limit. Immediate defragmentation or object deletion is required before the API server turns read-only."
+
+      # 2. CRITICAL: Explosive object growth spiking etcd revision sizes
+      - alert: KubeApiServerStorageObjectsSpike
+        expr: (sum by (resource) (apiserver_storage_objects or apiserver_resource_objects) - sum by (resource) (apiserver_storage_objects offset 15m or apiserver_resource_objects offset 15m)) > 5000
+        for: 5m
+        labels:
+          severity: critical
+          tier: control-plane
+          priority: P1
+        annotations:
+          summary: "Explosive object growth: {{ $labels.resource }}"
+          description: "The number of '{{ $labels.resource }}' has surged by >5,000 in 15 minutes. This will rapidly exhaust the 8GB etcd database limit."
+
+      # 3. WARNING: High overall count risking gradual bloat
+      - alert: KubeApiServerStorageObjectsHighVolume
+        expr: sum by (resource) (apiserver_storage_objects or apiserver_resource_objects) > 25000
+        for: 30m
+        labels:
+          severity: warning
+          tier: control-plane
+          priority: P3
+        annotations:
+          summary: "High volume of objects: {{ $labels.resource }}"
+          description: "Total count of '{{ $labels.resource }}' is {{ $value }}. This consumes massive etcd memory footprints under the 8GB limit."
+```
+You also need to ensure that the alert maps to the correct responder/teams
+```yaml
+route:
+  group_by: [cluster, region]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 1h
+  receiver: 'opsgenie'
+
+receivers:
+- name: 'opsgenie-control-plane'
+  opsgenie_configs:
+  - api_key: 'YOUR-OPSGENIE-INTEGRATION-API-KEY'
+    api_url: 'https://opsgenie.com' # Use https://opsgenie.com if your account is in the EU region
+    teams: ['Kubernetes-Platform-Team']
+    tags: 'kubernetes,etcd,apiserver'
+    # Map Prometheus labels dynamically to Opsgenie priorities
+    priority: '{{ if eq .CommonLabels.priority "P1" }}P1{{ else if eq .CommonLabels.priority "P3" }}P3{{ else }}P4{{ end }}'
+```
 
 ### 2. Cap your kubernetes object histories
 
