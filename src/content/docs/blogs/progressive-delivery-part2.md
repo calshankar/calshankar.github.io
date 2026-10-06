@@ -9,7 +9,9 @@ sidebar:
 
 [Part 1](/blogs/progressive-delivery-part1) walked through raw Argo Rollout CRDs, AnalysisTemplates, and the promote-or-abort loop. The manifests work, but they are also 150+ lines of YAML per service, and every team copies, forks, and drifts from what the platform originally intended.
 
-This post covers the layer above: the Open Application Model (OAM) via KubeVela. One YAML file, a handful of reusable traits, and your rollout, analysis, autoscaling, and ingress are declared together — versioned in Git, deployed through ArgoCD, and consistent across every cluster.
+This post covers the layer above: the Open Application Model (OAM) via KubeVela. One YAML file, a handful of reusable traits, and your rollout, analysis, autoscaling, and ingress are declared together, versioned in Git, deployed through ArgoCD, and consistent across every cluster.
+
+That is the abstraction I have been running in production-style demos for this series. Before you commit to it, it is worth comparing the same problem to [kro](https://kro.run/docs/overview/) (Kube Resource Orchestrator), which packages multi-resource apps as a generated CRD instead of an OAM `Application`.
 
 ## What OAM and KubeVela actually solve
 
@@ -232,7 +234,7 @@ AnalysisRun lifecycle during canary
  Rollout step                AnalysisRun                     Prometheus
  ──────────                  ───────────                     ──────────
  setWeight: 20 ──────────▶  background analysis starts
-                             │                               
+                             │
                              ├─ query (t=0) ───────────────▶ success-rate ≥ 0.95? ✓
                              │  wait interval: 1m
                              ├─ query (t=1m) ──────────────▶ success-rate ≥ 0.95? ✓
@@ -246,7 +248,7 @@ AnalysisRun lifecycle during canary
                              ├─ query: p99 ≤ 5ms? ✓
                              ├─ query: p99 ≤ 5ms? ✓
                              └─ 2/2 success → proceed
-                                                             
+
  setWeight: 60 ──────────▶  continues...
 ```
 
@@ -401,7 +403,7 @@ The analysis template parameters directly control how sensitive your automated g
 
 **Review and update metrics periodically.** Application behavior drifts over time — new endpoints, changed latency profiles, different traffic patterns. A query that was accurate six months ago may no longer reflect actual service health. Schedule a quarterly review of your analysis templates alongside your SLO review.
 
-**Set up alerts for analysis run failures.** When a rollout aborts, the team should know immediately — not discover it the next morning when the dashboard shows the old version is still running. Pipe analysis run status into your alerting system via the Argo Rollouts notification controller or ArgoCD notifications.
+**Set up alerts for analysis run failures.** When a rollout aborts, the team should know immediately, not discover it the next morning when the dashboard shows the old version is still running. Pipe analysis run status into your alerting system via the Argo Rollouts notification controller or ArgoCD notifications.
 
 ## Deploying with ArgoCD ApplicationSet
 
@@ -473,6 +475,42 @@ Two mitigations:
 1. **Use auto-sync** instead of manual sync in production. Auto-sync serializes reconciliation.
 2. **Enable the `garbage-collect` policy** in your KubeVela Application to retain legacy resources during updates. See [KubeVela GC policy docs](https://kubevela.io/docs/v1.9/end-user/policies/gc/).
 
+## Could kro replace KubeVela??
+
+Part 1 and the sections above assume Argo Rollouts stays the engine for canary steps and analysis gates. KubeVela is the **platform API** on top: it renders OAM into Rollouts, Services, Ingress, AnalysisTemplates, and the rest. [kro](https://kro.run/docs/overview/) targets the same platform-engineering slot with a different shape.
+
+You define a **ResourceGraphDefinition** (RGD): a schema (the fields your developers fill in) and a set of Kubernetes resource templates connected with CEL expressions in `${...}`. kro validates that definition before it reconciles any instance, infers dependency order from the expressions, generates a CRD at runtime, and runs a controller for each new API kind. Developers then apply instances of that CRD (`kind: ProgressiveWebApp`, or whatever you named it) instead of learning OAM `Application`, `Component`, and `Trait` types.
+
+For progressive delivery specifically, nothing about the promote-or-abort loop changes. You still need Rollout CRDs, AnalysisTemplates, and traffic routing. The question is whether your platform team wants to publish that bundle as **OAM + CUE traits** or as **one RGD that emits the same underlying objects** and exposes a narrower, CRD-shaped contract to app teams.
+
+### Mental model: OAM Application vs RGD + generated CRD
+
+| Concern | KubeVela + OAM | kro (RGD) |
+| --- | --- | --- |
+| What the developer applies | `Application` with `components` and `traits` | Instance of a generated CRD (e.g. `WebApp`, `RolloutService`) |
+| How the platform describes resources | Component/trait definitions (often CUE) | `spec.resources[]` templates in plain Kubernetes YAML |
+| Wiring between resources | Trait patches and component properties | CEL expressions referencing `schema`, `metadata`, and other resources' `status` |
+| Ordering | KubeVela render order + Kubernetes reconciliation | Dependency graph inferred from CEL references |
+| AWS-managed resources | Via traits, operators, or hand-written YAML | Natural fit with [ACK](https://aws-controllers-k8s.github.io/) types in the same graph (kro's docs use S3 `Bucket` as the canonical example) |
+
+I find kro easier to explain to teams that already live in `kubectl` and CRD OpenAPI, and OAM easier when we want a catalog of reusable traits and a workflow layer on top of rendering.
+
+### Strengths and trade-offs
+
+| | KubeVela + OAM | kro |
+| --- | --- | --- |
+| **Strengths** | Mature ecosystem, large trait/component library, multi-step **workflows** (suspend, approve, orchestrate across clusters), strong community and docs for platform teams; OAM separates "what the app is" from operational attachments | Smaller surface: RGD + instances, Kubernetes-native templates, CEL wiring; **validate-before-reconcile** on the definition; dependency graph from expressions instead of manual ordering; **CRD-as-product** fits GitOps (Helm chart ships instance CRs); aligns well with ACK/ASO-style operators in one graph |
+| **Weaknesses** | Heavier control plane and concepts (CUE, traits, policies); rendering bugs or GC edge cases (see [accidental deletions](#watch-out-accidental-deletions-during-rapid-syncs)) need operational discipline | Younger project; you build or port every platform pattern yourself (no shared trait catalog unless you maintain RGDs); multi-cloud app modeling is "whatever you put in the RGD," not a standardized OAM app model |
+
+kro does **not** universally replace KubeVela. For many teams doing progressive delivery, KubeVela **complements** the rollout stack: traits encode analysis and HLA once, workflows handle promotion gates that are not pure Kubernetes resources, and OAM is already battle-tested in multi-tenant platform setups.
+
+kro is a credible **replacement for the KubeVela/OAM layer** when:
+
+- Your platform API is "a fixed graph of Kubernetes types" (Rollout + Ingress + AnalysisTemplate + PDB + ScaledObject) and you are willing to maintain that graph as one or more RGDs.
+- Developers should interact with a **single generated CRD** per app type, not OAM vocabulary.
+- You want definition-time validation and CEL-linked dependencies without adopting CUE.
+- You are standardizing on AWS controllers (ACK) or similar operators beside workloads, and you want one orchestration model for all of them.
+
 ## Pre-deploy checklist
 
 A quick-reference list before you ship. Each item maps back to the detailed guidance in the [best practices section](#best-practices-and-parameter-tuning-that-prevent-real-incidents) above.
@@ -493,12 +531,14 @@ A quick-reference list before you ship. Each item maps back to the detailed guid
 - [ ] `syncPolicy` uses `ServerSideApply=true` for KubeVela CRDs in ApplicationSet
 - [ ] Tested in staging with `vela dry-run -f <app>.yaml` before production
 
+Whether you ship OAM Applications or kro-generated CRDs, the progressive delivery contract from Part 1 stays the same: weighted traffic, analysis that can abort the rollout, and manifests in Git for Argo CD to reconcile. Pick the platform abstraction that matches how much catalog and workflow you need, not the novelty of the controller.
+
 ## References
 
 - [OAM Application examples (Argo Rollouts + Analysis Templates)](https://github.com/calshankar/oam-component-traits/tree/main/tests/test_oam_applications)
 - [Rollouts component reference](https://github.com/calshankar/oam-component-traits/blob/main/docs/documentation/reference_traits/rollouts.md)
 - [AnalysisTemplate trait reference](https://github.com/calshankar/oam-component-traits/blob/main/docs/documentation/reference_traits/analysistemplate.md)
-- [HLA trait reference](https://github.com/calshankar/oam-component-traits/blob/main/docs/documentation/reference_traits/hla.md)
 - [KubeVela garbage collection](https://kubevela.io/docs/v1.9/end-user/policies/gc/)
 - [Vela CLI reference](https://kubevela.io/docs/cli/vela/) — `vela show <component-or-trait> -n vela-system` lists configurable parameters
 - [Part 1: Argo Rollouts + AnalysisTemplates](/blogs/progressive-delivery-part1)
+- [kro overview and ResourceGraphDefinitions](https://kro.run/docs/overview/)
