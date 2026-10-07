@@ -232,7 +232,7 @@ If you see `kube-scheduler` aggressively patching a specific Pod, you likely hav
 
 The EKS standard control plane dynamically scales the API server, but it cannot scale etcd beyond 8 GiB, and it cannot magically tune the Kubernetes controller manager to process Horizontal Pod Autoscaler (HPA) syncs faster without risking stability.
 
-For specialized workloads—like multi-tenant SaaS platforms, large-scale batch processing, or massive HPA deployments—you cannot tolerate the latency of EKS detecting load and dynamically scaling the control plane. You need the capacity available before the spike hits.
+For specialized workloads like multi-tenant SaaS platforms, large-scale batch processing, or massive HPA deployments you cannot tolerate the latency of EKS detecting load and dynamically scaling the control plane. You need the capacity available before the spike hits.
 
 This is why EKS introduced the Provisioned Control Plane.
 
