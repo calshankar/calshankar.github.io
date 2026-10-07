@@ -15,7 +15,7 @@ That is the abstraction I have been running in production-style demos for this s
 
 ## What OAM and KubeVela actually solve
 
-Kubernetes gives you primitives — Deployments, Services, Ingress, HPA, PDB — and expects you to wire them together. OAM replaces that per-resource assembly with two ideas:
+Kubernetes gives you primitives Deployments, Services, Ingress, HPA, PDB  and expects you to wire them together. OAM replaces that per-resource assembly with two ideas:
 
 - **Components** describe what your workload is (a web server, a rollout, a job).
 - **Traits** attach operational capabilities to a component (autoscaling, analysis, environment config) without modifying the component definition.
@@ -60,8 +60,8 @@ Before creating OAM manifests or deploying applications, ensure you have:
 
 - **Kubernetes cluster** with KubeVela installed (`vela install`)
 - **Container registry** your cluster can pull from
-- **CI/CD tooling** — GitHub Actions runners and ArgoCD for build/test/push of OAM manifests
-- **CLI tools** — `kubectl`, `helm`, and `vela` CLI (run `vela show <trait> -n vela-system` to explore available parameters)
+- **CI/CD tooling** GitHub Actions runners and ArgoCD for build/test/push of OAM manifests
+- **CLI tools** `kubectl`, `helm`, and `vela` CLI (run `vela show <trait> -n vela-system` to explore available parameters)
 
 ## Components and traits: the mapping
 
@@ -84,7 +84,7 @@ The `rollouts` component type wraps the Argo Rollout CRD. The key parameters mir
 
 | Parameter | Description | Default |
 |---|---|---|
-| `image` | Container image (e.g., `nginx:1.21.0`) | — (required) |
+| `image` | Container image (e.g., `nginx:1.21.0`) |  (required) |
 | `replicas` | Desired pod count | `3` |
 | `minReadySeconds` | Seconds a pod must be ready before considered available | `30` |
 | `revisionHistoryLimit` | Old ReplicaSets retained for rollback | `3` |
@@ -98,7 +98,7 @@ The `strategy` block is where Part 1's canary steps live, but now they are neste
 
 ## Canary strategy: from raw CRD to OAM
 
-In Part 1, the canary strategy lived in a standalone `Rollout` YAML. In OAM, it becomes a nested block inside the component `properties.strategy`. The shape is the same — `setWeight`, `pause`, `analysis` steps — but now the Rollout, Services, Ingress, and AnalysisTemplates are co-located in one file.
+In Part 1, the canary strategy lived in a standalone `Rollout` YAML. In OAM, it becomes a nested block inside the component `properties.strategy`. The shape is the same  `setWeight`, `pause`, `analysis` steps but now the Rollout, Services, Ingress, and AnalysisTemplates are co-located in one file.
 
 Here is how the canary steps, background analysis, and traffic routing look inside an OAM Application:
 
@@ -262,9 +262,9 @@ Combined example with rollout + analysis: [test-argo-rollouts-analysis.yaml](htt
 
 The `hla` (High-Level Availability) trait bundles three concerns that are usually three separate YAML files:
 
-1. **Pod Disruption Budget** — guarantees a minimum number of pods during node drains or maintenance. Default: `minAvailable: 50%` when replicas > 1.
-2. **KEDA autoscaling** — scales pods based on Prometheus metrics, CPU, memory, or external triggers. Supports scaling from zero for dev/QA environments.
-3. **Lifecycle hooks** — `preStop` commands to drain connections gracefully before pod termination.
+1. **Pod Disruption Budget** guarantees a minimum number of pods during node drains or maintenance. Default: `minAvailable: 50%` when replicas > 1.
+2. **KEDA autoscaling** scales pods based on Prometheus metrics, CPU, memory, or external triggers. Supports scaling from zero for dev/QA environments.
+3. **Lifecycle hooks** `preStop` commands to drain connections gracefully before pod termination.
 
 ```yaml
 - type: hla
@@ -319,7 +319,7 @@ Full HLA trait reference: [hla spec](https://github.com/calshankar/oam-component
 
 ## Best practices and parameter tuning that prevent real incidents
 
-The sections above cover how each piece works. This section covers how to configure them so they hold up in production. These are grouped by concern — general rollout hygiene, resource management, canary-specific tuning, blue-green specifics, analysis template configuration, and monitoring.
+The sections above cover how each piece works. This section covers how to configure them so they hold up in production. These are grouped by concern general rollout hygiene, resource management, canary-specific tuning, blue-green specifics, analysis template configuration, and monitoring.
 
 ### Getting the rollout foundation right
 
@@ -331,7 +331,7 @@ Before tuning anything strategy-specific, get the basics in place. Skipping any 
 
 **Set resource requests and limits on every component.** During a canary rollout, you are temporarily running more pods than steady state. If the canary pods have no resource requests, the scheduler might pack them onto an overcommitted node, and the latency spike you see in analysis is infrastructure noise rather than an application problem. Define `cpuRequest`, `memoryRequest`, `cpuLimit`, and `memoryLimit` in the rollout component properties.
 
-**Configure liveness, readiness, and startup probes.** Without readiness probes, the canary Service receives traffic before the application is actually ready. Without liveness probes, a stuck pod stays in rotation and contaminates your canary metrics. Startup probes are particularly important for JVM or heavy-init applications — they prevent the liveness probe from killing a pod that is still loading.
+**Configure liveness, readiness, and startup probes.** Without readiness probes, the canary Service receives traffic before the application is actually ready. Without liveness probes, a stuck pod stays in rotation and contaminates your canary metrics. Startup probes are particularly important for JVM or heavy-init applications they prevent the liveness probe from killing a pod that is still loading.
 
 **Write clear comments in your manifest.** OAM collapses many resources into a single file. Six months from now, someone will need to understand why `scaleDownDelaySeconds` is 120 instead of the default 60. A one-line comment next to the value saves a Slack thread.
 
@@ -345,17 +345,17 @@ Rollouts create additional ReplicaSets, which means additional pods competing fo
 
 **`minReadySeconds`** controls how long a new pod must be healthy before the controller considers it available. The default in the rollouts component is 30 seconds. If your application takes longer to warm up (loading caches, establishing connection pools), increase this. Setting it too low means the controller advances to the next step while the pod is still cold, and your analysis metrics reflect warm-up latency rather than steady-state behavior.
 
-**`progressDeadlineSeconds`** is your safety net for stalled rollouts. The default is 600 seconds (10 minutes). If no progress happens within this window — pods stuck in `ImagePullBackOff`, crash-looping init containers, a misconfigured readiness probe — the rollout is marked as failed. Set this based on your worst-case deploy time. For applications with heavy database migrations or slow JVM startup, 900-1200 seconds is reasonable.
+**`progressDeadlineSeconds`** is your safety net for stalled rollouts. The default is 600 seconds (10 minutes). If no progress happens within this window  pods stuck in `ImagePullBackOff`, crash-looping init containers, a misconfigured readiness probe the rollout is marked as failed. Set this based on your worst-case deploy time. For applications with heavy database migrations or slow JVM startup, 900-1200 seconds is reasonable.
 
 **`revisionHistoryLimit`** controls how many old ReplicaSets are retained for rollback. The default is 3, which is enough for most services. More than 5 just wastes etcd storage and makes `kubectl get rs` noisy. If your team rarely rolls back beyond the previous version, 2 is fine.
 
-**Monitor resource usage during the rollout itself.** The canary pods share the cluster with stable pods. If you see CPU throttling or memory pressure during the canary window, it might not be a code regression — it might be the cluster running out of headroom because you are now running `replicas * 2` pods temporarily.
+**Monitor resource usage during the rollout itself.** The canary pods share the cluster with stable pods. If you see CPU throttling or memory pressure during the canary window, it might not be a code regression or cluster running out of headroom because you are now running `replicas * 2` pods temporarily.
 
 ### Canary deployment tuning
 
 The canary strategy has several parameters that control rollout speed, safety margins, and traffic behavior.
 
-**`maxSurge` and `maxUnavailable`** work together to balance rollout speed against availability. `maxSurge` is the number of extra pods the controller can create beyond the desired replica count (default: 2). `maxUnavailable` is how many stable pods can be taken down during the update (default: 1). For a conservative rollout, set `maxSurge: 1` and `maxUnavailable: 0` — the controller creates one canary pod at a time and never reduces the stable set below the desired count.
+**`maxSurge` and `maxUnavailable`** work together to balance rollout speed against availability. `maxSurge` is the number of extra pods the controller can create beyond the desired replica count (default: 2). `maxUnavailable` is how many stable pods can be taken down during the update (default: 1). For a conservative rollout, set `maxSurge: 1` and `maxUnavailable: 0` the controller creates one canary pod at a time and never reduces the stable set below the desired count.
 
 **`scaleDownDelaySeconds`** keeps the old ReplicaSet alive after a weight shift. The default is 60 seconds. This matters because in-flight requests to the stable pods need time to drain. If you serve long-lived WebSocket connections or streaming responses, increase this to 120-300 seconds. For short HTTP request/response cycles, 60 seconds is usually sufficient.
 
@@ -363,13 +363,13 @@ The canary strategy has several parameters that control rollout speed, safety ma
 
 **Shift traffic in gradual steps.** The step sequence `20% → 40% → 60% → 80% → 100%` with pauses between each increment gives you multiple observation windows. Each pause is a chance for analysis to catch a regression. Jumping from 20% straight to 100% saves time but defeats the purpose of canary.
 
-**Define explicit rollback criteria in your analysis templates.** The analysis template's `successCondition` and `failureCondition` are your automated rollback triggers. Vague conditions like `result[0] > 0` are dangerous — they pass even when the metric is suspiciously low. Be specific: `result[0] >= 0.95` for success rate, `result[0] <= 200` for p99 latency in milliseconds.
+**Define explicit rollback criteria in your analysis templates.** The analysis template's `successCondition` and `failureCondition` are your automated rollback triggers. Vague conditions like `result[0] > 0` are dangerous as they pass even when the metric is suspiciously low. Be specific: `result[0] >= 0.95` for success rate, `result[0] <= 200` for p99 latency in milliseconds.
 
 ### Blue-green deployment tuning
 
 Blue-green is the alternative to canary when you want an all-or-nothing traffic switch rather than gradual weight shifting.
 
-**`autoPromotionSeconds`** controls how long the green (preview) environment runs before traffic is switched automatically. For critical services, set this high enough for your monitoring to catch problems — 300-600 seconds is a common range. For lower-risk services in staging, 60-120 seconds keeps iteration fast.
+**`autoPromotionSeconds`** controls how long the green (preview) environment runs before traffic is switched automatically. For critical services, set this high enough for your monitoring to catch problems, 300-600 seconds is a common range. For lower-risk services in staging, 60-120 seconds keeps iteration fast.
 
 **`previewReplicaCount`** determines how many pods run in the green environment during validation. This does not need to match your production replica count. For validation purposes, 1-2 replicas are often enough. Match production replicas only if your validation includes load testing.
 
@@ -385,11 +385,11 @@ The analysis template parameters directly control how sensitive your automated g
 
 **`interval` and `count`** together define the observation window. An interval of `1m` with a count of `5` means the analysis runs for at least 5 minutes. Match this to how quickly your application's metrics stabilize. Stateless API services stabilize in 2-3 minutes. Services with connection pools, caches, or downstream warmup may need 5-10 minutes.
 
-**`successCondition` and `failureCondition`** should be specific and meaningful. For success rate, `result[0] >= 0.95` is a common threshold. For latency, express the condition in the same unit your query returns — if the query returns milliseconds, write `result[0] <= 200`, not `result[0] <= 0.2`. A mismatch here is one of the most common debugging time-sinks.
+**`successCondition` and `failureCondition`** should be specific and meaningful. For success rate, `result[0] >= 0.95` is a common threshold. For latency, express the condition in the same unit your query returns if the query returns milliseconds, write `result[0] <= 200`, not `result[0] <= 0.2`. A mismatch here is one of the most common debugging time-sinks.
 
 **`consecutiveSuccessLimit`** requires multiple passing measurements in a row before the analysis is considered successful. This reduces the risk of promoting on a single lucky sample. A value of 3 means three consecutive measurements must pass. This is especially useful for metrics with high variance, like p99 latency.
 
-**`initialDelay`** delays the first measurement after the analysis run starts. The default in the trait is 3 minutes. Applications need warmup time — JVM JIT compilation, connection pool establishment, cache hydration. Measuring p99 latency during the first 60 seconds of a JVM service's life produces numbers that have nothing to do with steady-state performance.
+**`initialDelay`** delays the first measurement after the analysis run starts. The default in the trait is 3 minutes. Applications need warmup time JVM JIT compilation, connection pool establishment, cache hydration. Measuring p99 latency during the first 60 seconds of a JVM service's life produces numbers that have nothing to do with steady-state performance.
 
 **Tune based on observed behavior.** After a few rollouts, review the analysis run results. If you see intermittent failures followed by recovery, increase `failureLimit` from the default 3 to 4-5. If the analysis consistently passes on the first measurement, you can reduce the `count` to shorten the rollout window. These numbers are not set-and-forget.
 
@@ -397,11 +397,11 @@ The analysis template parameters directly control how sensitive your automated g
 
 **Use `dryRunMetricName` during initial setup.** This runs the Prometheus query and records the result, but the outcome does not affect the rollout. Use it for your first 2-3 deployments with a new analysis template to verify the query returns sensible numbers. Once you trust the query, remove the metric name from the dry-run list and let it gate the rollout for real.
 
-**Set `timeout` on metric queries.** If Prometheus is slow or unreachable, the analysis run blocks until timeout. Without an explicit timeout, the rollout sits in a `Running` state indefinitely. A timeout of 30-60 seconds is usually appropriate — if Prometheus cannot respond in that window, something else is wrong.
+**Set `timeout` on metric queries.** If Prometheus is slow or unreachable, the analysis run blocks until timeout. Without an explicit timeout, the rollout sits in a `Running` state indefinitely. A timeout of 30-60 seconds is usually appropriate if Prometheus cannot respond in that window, something else is wrong.
 
 **Write PromQL queries that return meaningful results even under low traffic.** The classic failure mode: your success-rate query divides requests with `status!~"[4-5].*"` by total requests. If total requests are zero (off-hours, low-traffic service), you get `NaN`, which fails the `successCondition`. Guard against this with a `or vector(1)` fallback, or use `failureCondition` instead of `successCondition` so that `NaN` does not auto-fail the analysis.
 
-**Review and update metrics periodically.** Application behavior drifts over time — new endpoints, changed latency profiles, different traffic patterns. A query that was accurate six months ago may no longer reflect actual service health. Schedule a quarterly review of your analysis templates alongside your SLO review.
+**Review and update metrics periodically.** Application behavior drifts over time  new endpoints, changed latency profiles, different traffic patterns. A query that was accurate six months ago may no longer reflect actual service health. Schedule a quarterly review of your analysis templates alongside your SLO review.
 
 **Set up alerts for analysis run failures.** When a rollout aborts, the team should know immediately, not discover it the next morning when the dashboard shows the old version is still running. Pipe analysis run status into your alerting system via the Argo Rollouts notification controller or ArgoCD notifications.
 
@@ -539,6 +539,6 @@ Whether you ship OAM Applications or kro-generated CRDs, the progressive deliver
 - [Rollouts component reference](https://github.com/calshankar/oam-component-traits/blob/main/docs/documentation/reference_traits/rollouts.md)
 - [AnalysisTemplate trait reference](https://github.com/calshankar/oam-component-traits/blob/main/docs/documentation/reference_traits/analysistemplate.md)
 - [KubeVela garbage collection](https://kubevela.io/docs/v1.9/end-user/policies/gc/)
-- [Vela CLI reference](https://kubevela.io/docs/cli/vela/) — `vela show <component-or-trait> -n vela-system` lists configurable parameters
+- [Vela CLI reference](https://kubevela.io/docs/cli/vela/) `vela show <component-or-trait> -n vela-system` lists configurable parameters
 - [Part 1: Argo Rollouts + AnalysisTemplates](/blogs/progressive-delivery-part1)
 - [kro overview and ResourceGraphDefinitions](https://kro.run/docs/overview/)
