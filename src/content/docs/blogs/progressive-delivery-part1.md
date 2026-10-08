@@ -218,4 +218,4 @@ Further reading:
 * [Progressive delivery with Gateway API](https://rollouts-plugin-trafficrouter-gatewayapi.readthedocs.io/en/latest/)
 * [Experiments CRD for launching Ephemeral Analysis](https://argo-rollouts.readthedocs.io/en/stable/features/experiment/)
 
-The Part 2 will cover, how to abstract all concepts into simple YAML format for Developers get the Rollouts / Release experiments running in under 60mins.
+The [Part 2](/blogs/progressive-delivery-part2) will cover, how to abstract all concepts into simple YAML format for Developers get the Rollouts/Release experiments running in under 60mins.
