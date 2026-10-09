@@ -734,5 +734,6 @@ You must use at least Kubernetes **version 1.33** (specifically version 1.33.3 o
 
 - [EKS Control Plane Configration](https://docs.aws.amazon.com/eks/latest/userguide/control-plane-configuration.html)
 - [Scalability Best Practice](https://docs.aws.amazon.com/eks/latest/best-practices/scalability.html)
+- [Constraints for Cluster @ Scale by GKE](https://docs.cloud.google.com/kubernetes-engine/docs/concepts/planning-large-clusters#limits-best-practices-large-scale-clusters) very good Read!
 - [EKS ultra scale clusters](https://aws.amazon.com/blogs/containers/under-the-hood-amazon-eks-ultra-scale-clusters/)
 - [Seekable OCI](https://aws.amazon.com/blogs/containers/introducing-seekable-oci-parallel-pull-mode-for-amazon-eks/)
