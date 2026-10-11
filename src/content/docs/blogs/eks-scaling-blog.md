@@ -254,7 +254,7 @@ fields @timestamp, user.username, userAgent, objectRef.resource, objectRef.names
 | limit 20
 ```
 
-Any client polling periodically on a collection without watch=true or an initial bootstrap should surface here. if the problem shows up more often than not then you can choose to protect the API server with [API Priority and Fairness](https://kubernetes.io/docs/concepts/cluster-administration/flow-control/)(APF) for protecting system controllers which are crucial to cluster operations (`system:nodes, Karpenter, CoreDNS, cluster autoscalers`)
+Any client polling periodically on a collection without watch=true or an initial bootstrap should surface here. if the problem shows up more often than not then you can choose to protect the API server with [API Priority and Fairness](https://kubernetes.io/docs/concepts/cluster-administration/flow-control/)(APF) for protecting system controllers which are crucial to cluster operations (`system:nodes, Karpenter, CoreDNS, critical controllers`)
 
 ## Scaling past standard limits with Provisioned Control Plane
 
