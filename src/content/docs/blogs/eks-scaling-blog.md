@@ -228,6 +228,34 @@ fields @timestamp, @message
 
 If you see `kube-scheduler` aggressively patching a specific Pod, you likely have an unschedulable pod spamming the control plane as the scheduler continually re-evaluates its constraints.
 
+### Audit and Detect Rogue Calls to API server
+
+Custom operators, controllers, or internal tools using raw queries(usually LIST) without field selectors or limiters will overload API server memory. All in-cluster clients must use **caches or watch-based streaming**.
+
+Ensuring all in-cluster clients use informer caches or watch-based streaming requires a combination of cluster-level observability (auditing & detection), control-plane guardrails ([APF](https://kubernetes.io/docs/concepts/cluster-administration/flow-control/) & RBAC), and client-side architectural standards.
+
+At large scale, clients making periodic raw LIST calls may force the API server to query etcd directly or serialize massive object lists into memory instead of **avoid hitting the underlying etcd database** (by explicitly setting resourceVersion="0") i.e use the in-memory **watch cache** instead.
+
+You can monitor which service accounts and user agents are executing such requests via Prometheus API server metrics or the API Server Audit logs(if enabled) by running query in CloudWatch Insights to pinpoint offending client.
+
+```promql
+# Identify the highest volume of requests with resourceVersion="" that hit etcd directly
+topk(20, sum by (resource, client) (
+  rate(apiserver_request_total{verb="list", scope="cluster"}[5m])
+))
+```
+
+```text
+fields @timestamp, user.username, userAgent, objectRef.resource, objectRef.namespace, requestURI
+| filter verb = "list"
+| filter requestURI not like /watch=true/
+| stats count(*) as listCount by user.username, userAgent, objectRef.resource
+| sort listCount desc
+| limit 20
+```
+
+Any client polling periodically on a collection without watch=true or an initial bootstrap should surface here. if the problem shows up more often than not then you can choose to protect the API server with [API Priority and Fairness](https://kubernetes.io/docs/concepts/cluster-administration/flow-control/)(APF) for protecting system controllers which are crucial to cluster operations (`system:nodes, Karpenter, CoreDNS, cluster autoscalers`)
+
 ## Scaling past standard limits with Provisioned Control Plane
 
 The EKS standard control plane dynamically scales the API server, but it cannot scale etcd beyond 8 GiB, and it cannot magically tune the Kubernetes controller manager to process Horizontal Pod Autoscaler (HPA) syncs faster without risking stability.
