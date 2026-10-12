@@ -343,7 +343,7 @@ spec:
               cpu: "1"
               memory: 2Gi
 ```
-Karpenter in its **v1.14** introduced [CapacityBuffers](https://karpenter.sh/docs/concepts/capacitybuffers/) an **alpha feature** that allows for pre-provisioning spare capacity for scheduling your workload which can significantly reducing the latency. This feature must be explicitly toggled via the feature gate.
+Karpenter in the **v1.14** release, introduced [CapacityBuffers](https://karpenter.sh/docs/concepts/capacitybuffers/) an **alpha feature** that allows for pre-provisioning spare capacity for scheduling your workload which can significantly reducing the latency. This feature must be explicitly toggled via the feature gate.  This feature is worth mentioning and can be a potential replacement for the placeholder strategy but do note that API behavior may have breaking changes in the future releases.
 ```bash
 --set settings.featureGates.capacityBuffer=true
 ```
