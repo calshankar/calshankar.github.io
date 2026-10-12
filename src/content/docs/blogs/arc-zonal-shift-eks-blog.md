@@ -343,6 +343,10 @@ spec:
               cpu: "1"
               memory: 2Gi
 ```
+Karpenter in its **v1.14** introduced [CapacityBuffers](https://karpenter.sh/docs/concepts/capacitybuffers/) an **alpha feature** that allows for pre-provisioning spare capacity for scheduling your workload which can significantly reducing the latency. This feature must be explicitly toggled via the feature gate.
+```bash
+--set settings.featureGates.capacityBuffer=true
+```
 
 **Verdict on A:** Keep it as a **latency** tool (warm seats). Do not sell it as ICE(insufficient capacity error) insurance. Pay On-Demand for idle buffer on purpose, or skip A and accept cold starts.
 
