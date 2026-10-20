@@ -11,6 +11,10 @@ export default defineConfig({
 		mermaid({
 			theme: 'neutral',
 			autoTheme: true,
+			mermaidConfig: {
+				flowchart: { useMaxWidth: false, htmlLabels: true, padding: 16 },
+				themeVariables: { fontSize: '15px' },
+			},
 		}),
 		starlight({
 			title: 'Shankar Ramanathan',
@@ -65,6 +69,13 @@ export default defineConfig({
 				{
 					tag: 'meta',
 					attrs: { name: 'twitter:card', content: 'summary_large_image' },
+				},
+				{
+					tag: 'script',
+					attrs: {
+						src: '/scripts/mermaid-expand.js?v=2',
+						defer: true,
+					},
 				},
 			],
 			sidebar: [
