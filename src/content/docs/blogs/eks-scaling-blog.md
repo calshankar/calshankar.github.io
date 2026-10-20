@@ -752,6 +752,8 @@ Compaction is a lightweight process that runs automatically (typically every 5 m
 
 **Noticing severe delays during pod launch on a new node. What could be the probable cause**
 
+The container image pull behavior is controlled by the Kubelet configuration flag called `serializeImagePulls`. By default, serializeImagePulls is set to true, which instructs the Kubelet to pull container images one at a time. Setting serializeImagePulls to false allows the Kubelet to pull multiple container images in parallel to speed up pod startup. Ideally to be used with maxParallelImagePulls (integer > 0) to cap how many images to pull concurrently. Your mileage may vary based on the bandwidth supported by the network adapter on the Node.
+
 Implement **SOCI Fast Pull**: To avoid severe bottlenecks when pulling massive container images (5GB+), use Seekable OCI (SOCI) alongside high-provisioned EBS volumes to enable parallel unpacking and concurrent layer downloads.
 
 **What Kubernetes(EKS) version would be ideal to start deploying for high scale containerized workloads?**
