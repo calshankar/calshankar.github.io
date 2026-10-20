@@ -313,10 +313,50 @@ ul.top-level li > details > summary {
 }
 .ej-hero-art text {
 	font-family: var(--sl-font-mono);
-	font-size: 11px;
 	letter-spacing: 0.08em;
 	text-transform: uppercase;
 	fill: var(--ink-mute);
+}
+.ej-art-labels--platform text {
+	font-size: 11px;
+}
+.ej-art-band-label {
+	font-size: 8px;
+	letter-spacing: 0.14em;
+	fill: var(--cadmium-strong);
+}
+.ej-art-labels--genai text {
+	font-size: 9px;
+	letter-spacing: 0.05em;
+	fill: var(--ink-soft);
+}
+.ej-art-links--genai line {
+	opacity: 0.4;
+	stroke-dasharray: 5 4;
+}
+.ej-art-nodes--genai circle {
+	fill: var(--paper);
+	stroke: var(--cadmium-strong);
+	stroke-width: 1.75;
+}
+.ej-art-anchor {
+	text-decoration: none;
+	cursor: pointer;
+}
+.ej-art-anchor text {
+	transition: fill 0.2s ease;
+}
+.ej-art-anchor:hover text,
+.ej-art-anchor:focus-visible text {
+	fill: var(--cadmium-strong);
+}
+.ej-art-anchor:focus-visible {
+	outline: none;
+}
+.ej-art-anchor:focus-visible text {
+	text-decoration: underline;
+	text-decoration-color: var(--cadmium-strong);
+	text-underline-offset: 3px;
 }
 .ej-art-nodes circle {
 	fill: var(--paper);
