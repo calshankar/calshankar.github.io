@@ -313,10 +313,50 @@ ul.top-level li > details > summary {
 }
 .ej-hero-art text {
 	font-family: var(--sl-font-mono);
-	font-size: 11px;
 	letter-spacing: 0.08em;
 	text-transform: uppercase;
 	fill: var(--ink-mute);
+}
+.ej-art-labels--platform text {
+	font-size: 11px;
+}
+.ej-art-band-label {
+	font-size: 8px;
+	letter-spacing: 0.14em;
+	fill: var(--cadmium-strong);
+}
+.ej-art-labels--genai text {
+	font-size: 9px;
+	letter-spacing: 0.05em;
+	fill: var(--ink-soft);
+}
+.ej-art-links--genai line {
+	opacity: 0.4;
+	stroke-dasharray: 5 4;
+}
+.ej-art-nodes--genai circle {
+	fill: var(--paper);
+	stroke: var(--cadmium-strong);
+	stroke-width: 1.75;
+}
+.ej-art-anchor {
+	text-decoration: none;
+	cursor: pointer;
+}
+.ej-art-anchor text {
+	transition: fill 0.2s ease;
+}
+.ej-art-anchor:hover text,
+.ej-art-anchor:focus-visible text {
+	fill: var(--cadmium-strong);
+}
+.ej-art-anchor:focus-visible {
+	outline: none;
+}
+.ej-art-anchor:focus-visible text {
+	text-decoration: underline;
+	text-decoration-color: var(--cadmium-strong);
+	text-underline-offset: 3px;
 }
 .ej-art-nodes circle {
 	fill: var(--paper);
@@ -677,4 +717,269 @@ ul.top-level li > details > summary {
 	.ej-title,
 	.ej-ledger .cell,
 	.ej-art-nodes .pulse { animation: none; opacity: 1; transform: none; }
+}
+
+/* =========================================================================
+   MERMAID — inline scroll + expand lightbox (blog diagrams)
+   ========================================================================= */
+
+.sl-markdown-content .mermaid-diagram-shell {
+	position: relative;
+	margin: 2rem 0;
+	border: 1px solid var(--rule);
+	border-radius: 0.5rem;
+	background: color-mix(in srgb, var(--paper-deep) 55%, transparent);
+}
+
+.sl-markdown-content pre.mermaid {
+	margin: 0;
+	padding: 1rem 1rem 2.75rem;
+	min-height: 12rem;
+	overflow-x: auto;
+	overflow-y: hidden;
+	justify-content: flex-start;
+	align-items: flex-start;
+	cursor: zoom-in;
+	border: none;
+	border-radius: 0.5rem;
+}
+
+.sl-markdown-content pre.mermaid.mermaid-modal-source-active {
+	min-height: 12rem;
+	background: color-mix(in srgb, var(--rule) 25%, var(--paper-deep));
+}
+
+.sl-markdown-content pre.mermaid.mermaid-modal-source-active::after {
+	content: 'Diagram expanded — close the viewer to return here';
+	display: block;
+	margin-top: 1rem;
+	font-family: var(--sl-font-mono);
+	font-size: 0.72rem;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: var(--ink-mute);
+	text-align: center;
+}
+
+.sl-markdown-content pre.mermaid svg {
+	max-width: none;
+	width: auto;
+	height: auto;
+	min-width: min(100%, 36rem);
+}
+
+.mermaid-expand-trigger {
+	position: absolute;
+	right: 0.65rem;
+	bottom: 0.65rem;
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+	font-family: var(--sl-font-mono);
+	font-size: 0.72rem;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--ink);
+	background: var(--paper);
+	border: 1px solid var(--rule-strong);
+	border-radius: 4px;
+	padding: 0.35rem 0.55rem;
+	cursor: pointer;
+	box-shadow: 0 4px 14px color-mix(in srgb, var(--ink) 8%, transparent);
+	transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.mermaid-expand-trigger:hover,
+.mermaid-expand-trigger:focus-visible {
+	color: var(--cadmium-strong);
+	border-color: var(--cadmium-strong);
+	outline: none;
+}
+
+.mermaid-expand-icon {
+	width: 0.85rem;
+	height: 0.85rem;
+	border: 1.5px solid currentColor;
+	border-radius: 2px;
+	position: relative;
+}
+
+.mermaid-expand-icon::before,
+.mermaid-expand-icon::after {
+	content: '';
+	position: absolute;
+	background: currentColor;
+}
+
+.mermaid-expand-icon::before {
+	width: 5px;
+	height: 1.5px;
+	right: -4px;
+	bottom: -4px;
+}
+
+.mermaid-expand-icon::after {
+	width: 1.5px;
+	height: 5px;
+	right: -4px;
+	bottom: -4px;
+}
+
+body.mermaid-modal-open {
+	overflow: hidden;
+}
+
+.mermaid-modal {
+	position: fixed;
+	inset: 0;
+	z-index: 10000;
+	display: grid;
+	place-items: center;
+	padding: clamp(0.5rem, 2vw, 1.25rem);
+}
+
+.mermaid-modal[hidden] {
+	display: none;
+}
+
+.mermaid-modal-backdrop {
+	position: absolute;
+	inset: 0;
+	border: none;
+	background: color-mix(in srgb, var(--ink) 72%, transparent);
+	cursor: pointer;
+}
+
+.mermaid-modal-panel {
+	position: relative;
+	z-index: 1;
+	width: min(96vw, 1400px);
+	height: min(92vh, 900px);
+	display: flex;
+	flex-direction: column;
+	background: var(--paper);
+	border: 1px solid var(--rule);
+	border-radius: 0.65rem;
+	box-shadow: 0 28px 80px color-mix(in srgb, var(--ink) 35%, transparent);
+	overflow: hidden;
+}
+
+.mermaid-modal-toolbar {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	padding: 0.65rem 0.85rem;
+	border-bottom: 1px solid var(--rule);
+	font-family: var(--sl-font-mono);
+	font-size: 0.75rem;
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+	color: var(--ink-mute);
+	background: var(--paper-deep);
+}
+
+.mermaid-modal-title {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--ink-soft);
+	text-transform: none;
+	letter-spacing: 0.01em;
+	font-size: 0.82rem;
+}
+
+.mermaid-modal-zoom {
+	display: flex;
+	align-items: center;
+	gap: 0.25rem;
+}
+
+.mermaid-modal-zoom button,
+.mermaid-modal-close {
+	font-family: var(--sl-font-mono);
+	font-size: 0.85rem;
+	line-height: 1;
+	min-width: 2rem;
+	min-height: 2rem;
+	padding: 0.25rem 0.45rem;
+	border: 1px solid var(--rule);
+	border-radius: 4px;
+	background: var(--paper);
+	color: var(--ink);
+	cursor: pointer;
+}
+
+.mermaid-modal-zoom button:hover,
+.mermaid-modal-zoom button:focus-visible,
+.mermaid-modal-close:hover,
+.mermaid-modal-close:focus-visible {
+	border-color: var(--cobalt);
+	color: var(--cobalt-deep);
+	outline: none;
+}
+
+.mermaid-modal-scale {
+	min-width: 3.5rem;
+	font-variant-numeric: tabular-nums;
+}
+
+.mermaid-modal-close {
+	font-size: 1.25rem;
+	padding-inline: 0.55rem;
+}
+
+.mermaid-modal-viewport {
+	position: relative;
+	flex: 1;
+	overflow: hidden;
+	cursor: grab;
+	touch-action: none;
+	background:
+		radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--rule) 70%, transparent) 1px, transparent 0)
+		0 0 / 18px 18px,
+		var(--paper);
+}
+
+.mermaid-modal-viewport.is-dragging {
+	cursor: grabbing;
+}
+
+.mermaid-modal-stage {
+	transform-origin: 0 0;
+	position: absolute;
+	top: 0;
+	left: 0;
+	will-change: transform;
+}
+
+.mermaid-modal-stage svg {
+	max-width: none !important;
+	width: auto !important;
+	height: auto !important;
+	display: block;
+}
+
+.mermaid-modal-hint {
+	margin: 0;
+	padding: 0.45rem 0.85rem 0.6rem;
+	font-family: var(--sl-font-mono);
+	font-size: 0.68rem;
+	letter-spacing: 0.05em;
+	text-transform: uppercase;
+	color: var(--ink-mute);
+	border-top: 1px solid var(--rule);
+	background: var(--paper-deep);
+}
+
+@media (max-width: 640px) {
+	.mermaid-expand-trigger span:not(.mermaid-expand-icon) {
+		display: none;
+	}
+	.mermaid-modal-panel {
+		width: 100%;
+		height: 100%;
+		border-radius: 0.35rem;
+	}
 }
