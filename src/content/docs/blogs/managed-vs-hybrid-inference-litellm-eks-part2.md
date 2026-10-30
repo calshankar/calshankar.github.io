@@ -17,7 +17,7 @@ Governing a multi-tenant generative AI platform on Amazon EKS requires coordinat
 1. **Cluster Admission Control (Kyverno)**: Restricts namespace capabilities, validates pod security profiles, and binds client identities strictly to allowed model lists.
 2. **AI Gateway Policy & Runtime Enforcement (LiteLLM)**: Enforces API key authorization, team spend allocations, rate limits, and sub-millisecond circuit breaking.
 3. **Bedrock Application Inference Profiles**: Isolates AWS account quotas, provides cost-allocation tags for the AWS Cost and Usage Report (CUR), and prevents noisy-neighbor throttling across business units.
-4. **Declarative In-Cluster Circuit Breaking via Model Route Mutation**: Crossplane observes live CloudWatch metric alarms in Kubernetes as `MetricAlarm` custom resources. When an alarm triggers, Kyverno detects the status update (`status.atProvider.stateValue`), extracts the breached team name, and dynamically mutates LiteLLM's configuration to swap that team's virtual model alias to an explicit error route. LiteLLM watches its configuration file, hot-reloads in memory with zero container restarts, and drops subsequent prompts with an informative HTTP 429 response.
+4. **Spend circuit breaking (GitOps config + LiteLLM enforcement)**: Route YAML stays in Git under Argo CD. LiteLLM team budgets and virtual keys block runaway traffic at the gateway in seconds. CloudWatch rolling alarms on Bedrock invocation logs remain the financial backstop; Crossplane mirrors alarm state into the cluster; a small **circuit reconciler** (or optional **EventBridge → Lambda**) calls the LiteLLM management API to block a team when an alarm fires, without patching ConfigMaps or fighting GitOps sync.
 
 The manifests in this post are a deliberate starting point: one `Deployment`, modular `ConfigMap` mounts, and Valkey for shared router state. That matches how many teams first land LiteLLM on EKS. Once you run multiple gateway replicas, team-scoped virtual keys, and an Admin UI in production, LiteLLM's own [manifest-to-microservices migration guide](https://docs.litellm.ai/docs/proxy/manifests_to_microservices) is the upgrade path worth planning for.
 
@@ -36,7 +36,7 @@ Postgres and Valkey stay put; you split `DATABASE_URL` into chart values plus a 
 
 Install the chart **alongside** your manifest Deployment first (`ingress.enabled: false`), verify readiness on `litellm-gateway:4000`, then flip ingress in step 7 of the [migration guide](https://docs.litellm.ai/docs/proxy/manifests_to_microservices). Pin the chart version to match your proxy image (example uses `1.98.0`).
 
-Merge `litellm-base-config` and the keys from `litellm-team-routes` into `gateway.config.proxy_config` below. If you keep Kyverno mutating per-team YAML files, mount them with `gateway.extraVolumes` / `gateway.extraVolumeMounts` and pass the same `--config` directory args the monolith Deployment uses.
+Merge `litellm-base-config` and the keys from `litellm-team-routes` into `gateway.config.proxy_config` below. Per-team route files remain **Git-owned only**; circuit-breaker state lives in LiteLLM (API/DB), not in mutated ConfigMap keys.
 
 ```yaml
 # helm upgrade --install litellm oci://ghcr.io/berriai/litellm/chart/litellm \
@@ -141,34 +141,34 @@ ingress:
 flowchart TD
     subgraph EKSCluster["Amazon EKS Governance Plane"]
         ClientPod["Client Microservice Pod<br/>(Team: team-alpha)"]
-        KyvernoPolicy["Kyverno Policy Engine<br/>(dynamic-team-inference-circuit-breaker)"]
-        BaseConfig["ConfigMap: litellm-base-config<br/>(/etc/litellm/base.yaml)"]
-        RouteConfig["ConfigMap: litellm-team-routes<br/>(/etc/litellm/routes/team-alpha.yaml)"]
-        LiteLLMGW["LiteLLM AI Gateway Pod<br/>(LITELLM_WATCH_CONFIG: True)"]
-        CrossplaneCW["Crossplane AWS CloudWatch Provider<br/>(team-alpha-token-alarm)"]
+        KyvernoAdm["Kyverno Admission<br/>(entitlements stamp only)"]
+        BaseConfig["Git → ConfigMap: litellm-base-config"]
+        RouteConfig["Git → ConfigMap: litellm-team-routes"]
+        LiteLLMGW["LiteLLM AI Gateway"]
+        Reconciler["circuit-reconciler Deployment"]
+        CrossplaneCW["Crossplane MetricAlarm<br/>(Observe-Only)"]
 
-        ClientPod -.->|"1. Manifest Admission Check"| KyvernoPolicy
-        ClientPod -->|"2. POST /v1/chat/completions<br/>model: team-alpha-bedrock-profile"| LiteLLMGW
-        LiteLLMGW <-->|"3. Directory Watcher on /etc/litellm/routes"| RouteConfig
-        LiteLLMGW <-->|"4. Base Gateway Config"| BaseConfig
+        ClientPod -.->|"1. Admission check + stamp"| KyvernoAdm
+        ClientPod -->|"2. POST /v1/chat/completions<br/>Authorization: Bearer virtual-key"| LiteLLMGW
+        LiteLLMGW <-->|"3. Static routes (Argo sync)"| RouteConfig
+        LiteLLMGW <-->|"4. Base config (Argo sync)"| BaseConfig
     end
 
     subgraph AWSManagement["AWS Provider & Observability Plane"]
         AppProfile["Bedrock Application Inference Profile<br/>(team-alpha-aip)"]
-        BedrockFM["Amazon Bedrock Foundation Model<br/>(Nova Pro / Claude 3.5 Sonnet)"]
-        BedrockLogs["Bedrock Invocation Logs<br/>(/aws/bedrock/invocation-logs)"]
-        CWFilter["CloudWatch Metric Filter<br/>(TeamId Dimension)"]
-        CWAlarm["CloudWatch Rolling Alarms<br/>(Bedrock-TokenBreach-team-alpha-4h)"]
+        BedrockFM["Amazon Bedrock Foundation Model"]
+        BedrockLogs["Bedrock Invocation Logs"]
+        CWFilter["CloudWatch Metric Filter (TeamId)"]
+        CWAlarm["CloudWatch Rolling Alarms (4h / 8h / 12h)"]
 
-        LiteLLMGW -->|"5. Forward when route is Active"| AppProfile
+        LiteLLMGW -->|"5. Budget OK → forward"| AppProfile
         AppProfile --> BedrockFM
-        BedrockFM -.->|"6. Log Tokens & Identity"| BedrockLogs
+        BedrockFM -.->|"6. Tokens + requestMetadata"| BedrockLogs
         BedrockLogs --> CWFilter
         CWFilter --> CWAlarm
-        CWAlarm -.->|"7. Live State Mirrored<br/>Observe-Only Mode"| CrossplaneCW
-        CrossplaneCW -->|"8. status.atProvider.stateValue: ALARM"| KyvernoPolicy
-        KyvernoPolicy -->|"9. Mutates team-alpha.yaml to rpm: 0"| RouteConfig
-        RouteConfig -.->|"10. Hot-Reloads in Memory (Zero Restarts)"| LiteLLMGW
+        CWAlarm -.->|"7. Observe-only mirror"| CrossplaneCW
+        CrossplaneCW -->|"8. stateValue: ALARM"| Reconciler
+        Reconciler -->|"9. POST /team/block (idempotent)"| LiteLLMGW
     end
 ```
 
@@ -202,19 +202,15 @@ flowchart TD
 ```
 
 >[!IMPORTANT]
-> To prevent constant out-of-sync warnings or infinite reconciliation battles with ArgoCD:
+> Argo CD and Kyverno only conflict when **two controllers write the same field**. Kyverno stamps pod annotations at admission; Git owns LiteLLM ConfigMaps. Ignore **only** the stamped annotations, not route ConfigMap data.
 >
-> 1. Instruct ArgoCD to ignore differences on dynamic annotations stamped by Kyverno.
-> 2. Instruct ArgoCD to ignore differences on the `litellm-team-routes` ConfigMap `data` field so ArgoCD does not immediately revert circuit breaker route mutations.
+> 1. Instruct Argo CD to ignore differences on dynamic annotations stamped by Kyverno.
+> 2. Keep **self-heal enabled** on `litellm-team-routes` so Git remains the source of truth for virtual model → Bedrock AIP mappings.
 >
 ```yaml
 resource.customizations.ignoreDifferences.all: |
   jqPathExpressions:
     - '.metadata.annotations | select(. != null) | with_entries(select(.key | startswith("ai.company.internal/")))'
-
-resource.customizations.ignoreDifferences.ConfigMap: |
-  jsonPointers:
-    - /data
 ```
 
 #### Step 1: The Authoritative Entitlements Matrix (`team-model-entitlements`)
@@ -469,7 +465,7 @@ Using an Application Inference Profile with a 1-to-1 team mapping provides three
 
 ### 2b. LiteLLM Security and Production Hardening on EKS
 
-Cluster admission (Kyverno) and gateway policy (virtual keys, spend limits) cover your Kubernetes and API boundaries. LiteLLM still needs proxy-level controls.
+Cluster admission (Kyverno) and gateway policy (virtual keys, spend limits) cover your Kubernetes and API boundaries. LiteLLM still needs proxy-level controls aligned with the [security best practices](https://docs.litellm.ai/docs/proxy/security_best_practices) and [production checklist](https://docs.litellm.ai/docs/proxy/prod).
 
 **Identity and admin access**
 
@@ -487,7 +483,7 @@ Pin an exact image tag (never `main-latest` in production). Set `LITELLM_MODE=PR
 
 Use `proxy_batch_write_at: 60` and, above roughly 1000 RPS, `use_redis_transaction_buffer: true`. Cap DB pool size per worker (`database_connection_pool_limit`) against `maxReplicas` so HPA does not exhaust Postgres. Run `--num_workers 1` per pod and scale replicas horizontally; optionally split `LITELLM_JOB_ROLE=serving` on gateway pods and a single `worker` Deployment for budget resets, as in LiteLLM's production topology example.
 
-The `litellm-base-config` ConfigMap below folds these settings together with the modular routing from Step 1.
+Section 4 documents the GitOps ConfigMaps (`litellm-base-config`, per-team route keys) with `store_model_in_db: true` so team budgets and blocks persist in Postgres.
 
 ---
 
@@ -520,7 +516,9 @@ LiteLLM exposes a Prometheus `/metrics` endpoint that tracks internal request ro
 * `litellm_remaining_team_budget_metric`: Exposes remaining financial balances per team, allowing platform engineers to build real-time Grafana alerts before a team hits zero balance.
 * `litellm_latency_per_output_token`: Tracks generation speeds to identify decode bottlenecks.
 
-Platform engineers configure a standard Prometheus `PodMonitor` or `ServiceMonitor` to scrape the gateway pods every 15 seconds:
+Platform engineers configure a standard Prometheus `PodMonitor` or `ServiceMonitor` to scrape the gateway pods every 15 seconds.
+
+For **runaway agent loops**, add Grafana alerts on `litellm_total_tokens` and `litellm_remaining_team_budget_metric` with sub-minute evaluation windows. CloudWatch remains the billing-grade backstop on Bedrock invocation logs; Prometheus catches gateway-side surges before the 4-hour rolling alarm evaluates.
 
 ```yaml
 apiVersion: monitoring.coreos.com/v1
@@ -571,47 +569,80 @@ Platform engineers configure a **CloudWatch Metric Filter** to isolate token con
 
 ---
 
-### 4. Declarative Zero-Downtime Circuit Breaking with Crossplane, Kyverno, and LiteLLM Model Aliasing
+### 4. GitOps route config and LiteLLM-native circuit breaking
 
-Setting a static 24-hour token budget creates an operational vulnerability. If an engineer deploys an autonomous agent that enters an infinite recursion loop at 9:00 AM, a daily budget evaluation allows that loop to burn 100% of the team's daily allocation in thirty minutes.
+A static 24-hour token budget still leaves a hole for autonomous agents. An infinite tool loop at 9:00 AM can burn through a daily allocation in thirty minutes if you only evaluate budgets once per day.
 
-To catch anomalous traffic patterns before they cause financial harm, configure multi-tier rolling window alarms in Amazon CloudWatch:
+We use **three enforcement layers** with different speeds, plus a GitOps rule: **Git is the only writer of LiteLLM route YAML**. Kyverno never patches route ConfigMaps at runtime.
 
-1. **4-Hour Window (Catastrophic Surge Circuit Breaker)**: Evaluates the sum of `TotalTokensConsumed` over a 4-hour rolling window with a strict threshold (e.g., 2,000,000 tokens). This catches runaway loops, broken retry configurations, or denial-of-service traffic patterns within minutes.
-2. **8-Hour Window (Single-Shift Ceiling)**: Tracks consumption across a standard business shift (e.g., 4,500,000 tokens). Prevents a team from depleting their weekly allocation during a single daytime spike.
-3. **12-Hour Window (Half-Day Governance Cap)**: Enforces a half-day stabilization cap (e.g., 6,000,000 tokens), preventing automated overnight batch runs from overrunning cluster quotas.
+#### Three configuration planes (GitOps model)
+
+| Plane | What it holds | Source of truth | How it changes |
+| :--- | :--- | :--- | :--- |
+| **Entitlements** | Namespace → allowed virtual models | Git (`team-model-entitlements`) | Platform PR |
+| **Routes** | Virtual alias → Bedrock AIP / vLLM base URL, nominal RPM in spec | Git (`litellm-team-routes` keys) | Platform PR |
+| **Enforcement state** | Team blocked vs active, spend counters | LiteLLM (Postgres/Valkey + audit logs) | Budgets, API block, automation |
+
+Circuit-breaker **state** does not belong in cloned route files. If you mutate `rpm: 0` in a ConfigMap and tell Argo CD to ignore `/data`, Git stops describing production and disaster recovery from Git can accidentally unblock a team still in ALARM.
+
+#### Layer 1: LiteLLM budgets and virtual keys (fastest)
+
+Align team `max_budget`, `budget_duration`, and per-key model allowlists in Git (seeded into LiteLLM with `store_model_in_db: true`). Set gateway budgets **slightly below** CloudWatch alarm thresholds so the proxy returns **HTTP 429** before Bedrock logs accumulate enough tokens to breach the 4-hour window.
+
+When generating keys, bind `team_id`, `max_budget`, and `models[]` so a runaway loop hits the gateway counter in seconds, not after the next CloudWatch evaluation period.
+
+#### Layer 2: CloudWatch rolling alarms (financial backstop)
+
+Configure multi-tier rolling window alarms in Amazon CloudWatch:
+
+1. **4-Hour Window (Catastrophic Surge)**: Sum of `TotalTokensConsumed` over 4 hours (e.g., 2,000,000 tokens). Catches runaway loops and broken retry storms.
+2. **8-Hour Window (Shift Ceiling)**: e.g., 4,500,000 tokens across a business day.
+3. **12-Hour Window (Half-Day Cap)**: e.g., 6,000,000 tokens for overnight batch guardrails.
 
 ```mermaid
 graph LR
     subgraph MultiWindowEvaluation["Tiered Rolling Window Defense"]
-        Window4h["4-Hour Rolling Window\nLimit: 2M Tokens\nTarget: Catches Runaway Loops"]
-        Window8h["8-Hour Rolling Window\nLimit: 4.5M Tokens\nTarget: Shift Overuse Cap"]
-        Window12h["12-Hour Rolling Window\nLimit: 6M Tokens\nTarget: Half-Day Budget Ceiling"]
+        Window4h["4-Hour Rolling Window\nLimit: 2M Tokens"]
+        Window8h["8-Hour Rolling Window\nLimit: 4.5M Tokens"]
+        Window12h["12-Hour Rolling Window\nLimit: 6M Tokens"]
     end
 
-    Window4h -->|Breach| CWAlarmState[CloudWatch Metric Alarm State: ALARM]
+    Window4h -->|Breach| CWAlarmState[CloudWatch ALARM]
     Window8h -->|Breach| CWAlarmState
     Window12h -->|Breach| CWAlarmState
-    CWAlarmState --> CrossplaneCRD[Crossplane Observe-Only MetricAlarm\nteam-alpha-token-alarm]
-    CrossplaneCRD --> KyvernoPolicy[Kyverno Dynamic Policy Engine\ndynamic-team-inference-circuit-breaker]
-    KyvernoPolicy --> LiteLLMConfigMap["ConfigMap: litellm-team-routes\nMutates team-alpha.yaml to rpm: 0"]
+    CWAlarmState --> CrossplaneCRD[Crossplane Observe MetricAlarm]
+    CrossplaneCRD --> Reconciler[circuit-reconciler or Lambda]
+    Reconciler --> LiteLLMAPI[LiteLLM /team/block]
 ```
 
-#### The Architecture of Model Aliasing and Modular Directory Configurations
+#### Layer 3: Emergency actuator (CloudWatch → LiteLLM API)
 
-Traditional circuit breakers try to inject runtime blocklists, flush Redis keys, or terminate client pods.
+Crossplane **Observe** mode mirrors each live alarm into `status.atProvider.stateValue`. A thin actuator reacts to `ALARM` / `OK`:
 
-The cleanest declarative approach inside Kubernetes is **Model Aliasing paired with Modular Directory Configurations**:
+**Option A (default on EKS): in-cluster `circuit-reconciler`**
 
-1. **Virtual Model Aliasing**: Client microservices never call raw AWS foundation model IDs or physical Bedrock ARNs directly. Microservices target a virtual model profile alias assigned to their team (e.g., `team-alpha-bedrock-profile`).
-2. **Modular Multi-File ConfigMaps**: In Kubernetes, `ConfigMap.data` is a `map[string]string`. If you store all team routes in a single monolithic `config.yaml` string, a Strategic Merge Patch will overwrite the entire string, erasing all other teams' routes. To prevent this, we split LiteLLM's configuration into two ConfigMaps:
-   * `litellm-base-config`: Contains `/etc/litellm/base.yaml` (global settings, cache params, base models like `internal-workhorse` and `frontier-reasoning`).
-   * `litellm-team-routes`: Contains modular per-team route files as separate keys in `data` (`team-alpha.yaml`, `team-beta.yaml`). When Kyverno mutates `team-alpha.yaml`, it updates **only that specific key**, leaving all other teams completely untouched.
-3. **Native Rate-Limiting via `rpm: 0`**: Rather than hijacking global `NotFoundError` (which turns legitimate model typos into false token breach alerts), Kyverno mutates Team Alpha's route to set `rpm: 0`. LiteLLM natively intercepts calls to zero-RPM routes and returns an immediate `RateLimitError` (HTTP 429 Too Many Requests) with `Retry-After` headers.
+- One Deployment, ~30s poll loop over `MetricAlarm` objects named `team-*-token-alarm`.
+- On `ALARM`: idempotent `POST` to LiteLLM management API (block team or set `max_budget` to 0).
+- On `OK`: unblock only if Git declares `autoRecover: true` for that team (see `team-circuit-policy` below). Default is **manual** unblock after incident review.
 
-#### Step 1: The Core LiteLLM Modular Configuration
+**Option B: EventBridge → Lambda**
 
-Deploy the base configuration ConfigMap containing shared settings:
+- CloudWatch alarm state change triggers a VPC Lambda that calls the same LiteLLM API through your internal ALB.
+- Useful if you already standardize automation on EventBridge and want **zero** extra cluster controllers. You still record blocks in LiteLLM audit logs; secrets and IAM live outside the GitOps repo.
+
+Both options skip ConfigMap reload latency entirely.
+
+#### Modular GitOps route files (static only)
+
+Split configuration so Argo can sync per-team files without monolithic merge conflicts:
+
+1. **Virtual model aliasing**: Clients call `team-alpha-bedrock-profile`, not raw Bedrock ARNs.
+2. **`litellm-base-config`**: Global router, cache, security, and shared models (`internal-workhorse`, `frontier-reasoning`).
+3. **`litellm-team-routes`**: One ConfigMap key per team (`team-alpha.yaml`, `team-beta.yaml`) checked into Git under `ai-platform/litellm/routes/`.
+
+Nominal `rpm` in Git is a **capacity spec**, not the emergency brake. Do not patch it at runtime.
+
+#### Step 1: Base and team route ConfigMaps (Argo-managed)
 
 ```yaml
 apiVersion: v1
@@ -623,7 +654,7 @@ data:
   base.yaml: |
     general_settings:
       master_key: os.environ/LITELLM_MASTER_KEY
-      store_model_in_db: false
+      store_model_in_db: true
       disable_env_credential_login: true
       disable_error_logs: true
       proxy_batch_write_at: 60
@@ -660,8 +691,6 @@ data:
       enable_pre_call_checks: true
 ```
 
-Deploy the modular team routes ConfigMap where each team owns a dedicated key:
-
 ```yaml
 apiVersion: v1
 kind: ConfigMap
@@ -686,9 +715,24 @@ data:
           rpm: 10000
 ```
 
-#### Step 2: Secure AWS Authentication via Crossplane IRSA
+Optional Git policy for auto-recovery after CloudWatch clears:
 
-Crossplane requires read-only permissions to poll CloudWatch alarms without storing static AWS access keys inside the cluster.
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: team-circuit-policy
+  namespace: ai-platform
+data:
+  team-alpha: |
+    autoRecover: false
+  team-beta: |
+    autoRecover: true
+```
+
+#### Step 2: Crossplane IRSA for alarm observation
+
+Crossplane needs read-only CloudWatch access without long-lived access keys in the cluster.
 
 Create an IAM Role (`CrossplaneCloudWatchObserverRole`) with read-only CloudWatch permissions:
 
@@ -732,11 +776,7 @@ spec:
       roleARN: arn:aws:iam::123456789012:role/CrossplaneCloudWatchObserverRole
 ```
 
-#### Step 3: Track the Token Breach Alarm via Crossplane in Observe-Only Mode
-
-Deploy a `MetricAlarm` custom resource using the Upbound AWS CloudWatch provider.
-
-By declaring `managementPolicies: ["Observe"]`, Crossplane polls the live AWS CloudWatch alarm without creating, modifying, or deleting the alarm on AWS:
+#### Step 3: Observe-only `MetricAlarm` custom resource
 
 ```yaml
 apiVersion: cloudwatch.aws.upbound.io/v1beta1
@@ -747,7 +787,6 @@ metadata:
   annotations:
     crossplane.io/external-name: "Bedrock-TokenBreach-team-alpha-4h"
 spec:
-  # Observe-only: do not mutate AWS resources; poll live status into Kubernetes
   managementPolicies: ["Observe"]
   forProvider:
     region: us-east-1
@@ -766,76 +805,76 @@ spec:
     name: aws-provider-config
 ```
 
-Crossplane continuously synchronizes the live alarm status into the custom resource status block:
+Crossplane mirrors live state into the CR:
 
 ```yaml
 status:
   atProvider:
-    stateValue: "ALARM" # Reflects actual live AWS state: OK, ALARM, or INSUFFICIENT_DATA
+    stateValue: "ALARM"
     stateReason: "Threshold Crossed: 1 datapoint [2450000.0] was greater than the threshold (2000000.0)."
     dimensions:
       - name: TeamId
         value: team-alpha
 ```
 
-#### Step 4: Multi-Tenant Kyverno Route Mutation Policy
+#### Step 4: Circuit reconciler Deployment (Option A)
 
-Instead of writing separate policies for every team, a single Kyverno `ClusterPolicy` evaluates the incoming alarm resource, extracts the target team from the alarm dimensions, and mutates only that team's route key in `litellm-team-routes`.
-
-The rule uses Kyverno context variables and the `choice()` conditional function to toggle `rpm: 0` during breaches:
+The reconciler reads `MetricAlarm` status, maps `TeamId` dimensions to LiteLLM `team_id`, and calls the management API using a scoped platform admin key from a Secret (not the master key in application code).
 
 ```yaml
-apiVersion: kyverno.io/v1
-kind: ClusterPolicy
+apiVersion: apps/v1
+kind: Deployment
 metadata:
-  name: dynamic-team-inference-circuit-breaker
+  name: circuit-reconciler
+  namespace: ai-platform
 spec:
-  rules:
-    - name: evaluate-and-patch-team-route
-      match:
-        any:
-          - resources:
-              kinds:
-                - cloudwatch.aws.upbound.io/v1beta1/MetricAlarm
-              names:
-                - "team-*-token-alarm"
-              namespaces:
-                - ai-platform
-      context:
-        # 1. Extract teamId from the alarm dimension (safe against hyphens in team names)
-        - name: teamId
-          variable:
-            value: "{{ request.object.spec.forProvider.dimensions[?name=='TeamId'].value | [0] }}"
-        # 2. Extract the live alarm state string reported by Crossplane
-        - name: alarmState
-          variable:
-            value: "{{ request.object.status.atProvider.stateValue }}"
-      mutate:
-        targets:
-          - apiVersion: v1
-            kind: ConfigMap
-            name: litellm-team-routes
-            namespace: ai-platform
-        patchStrategicMerge:
-          data:
-            # Surgically patches only team-{{teamId}}.yaml without touching other keys
-            team-{{teamId}}.yaml: |
-              model_list:
-                - model_name: team-{{teamId}}-bedrock-profile
-                  litellm_params:
-                    model: bedrock/arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/team-{{teamId}}-aip
-                    aws_region_name: us-east-1
-                    rpm: {{ choice('{{alarmState}}' == 'ALARM', 0, 10000) }}
+  replicas: 1
+  selector:
+    matchLabels:
+      app: circuit-reconciler
+  template:
+    metadata:
+      labels:
+        app: circuit-reconciler
+    spec:
+      serviceAccountName: circuit-reconciler-sa
+      containers:
+        - name: reconciler
+          image: your-registry/litellm-circuit-reconciler:0.1.0
+          env:
+            - name: LITELLM_API_BASE
+              value: "http://litellm-service.ai-platform.svc.cluster.local:4000"
+            - name: LITELLM_PLATFORM_ADMIN_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: litellm-secrets
+                  key: LITELLM_PLATFORM_ADMIN_KEY
+            - name: RECONCILE_INTERVAL_SECONDS
+              value: "30"
+            - name: METRIC_ALARM_NAMESPACE
+              value: ai-platform
+            - name: METRIC_ALARM_NAME_PREFIX
+              value: team-
+            - name: METRIC_ALARM_NAME_SUFFIX
+              value: "-token-alarm"
+            - name: TEAM_CIRCUIT_POLICY_CONFIGMAP
+              value: team-circuit-policy
 ```
 
-This policy delivers two critical operational behaviors:
+Example block call (your reconciler wraps this with retries and idempotency):
 
-* **Surgical Route Throttling**: When Crossplane reports `ALARM`, Kyverno patches `data["team-alpha.yaml"]` so that `rpm: 0`. LiteLLM's router immediately rejects calls to `team-alpha-bedrock-profile` with a native `RateLimitError` (HTTP 429 Too Many Requests).
-* **Bi-Directional Auto-Recovery**: The second the rolling window clears on CloudWatch and Crossplane reports `OK`, the `choice()` function automatically reverts `rpm: 10000`, restoring traffic without human intervention.
+```bash
+curl -sS -X POST "${LITELLM_API_BASE}/team/block" \
+  -H "Authorization: Bearer ${LITELLM_PLATFORM_ADMIN_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{"team_id": "team-alpha"}'
+```
 
-#### Step 5: Zero-Restart Dynamic Config Hot-Reload in LiteLLM (Directory Mounts)
+Consult the current [LiteLLM proxy team management docs](https://docs.litellm.ai/docs/proxy/team) for the exact block/unblock endpoints on your pinned version.
 
-To allow LiteLLM to watch for configuration changes without pod restarts, we mount `/etc/litellm/routes` as a **directory mount**. LiteLLM is configured with `LITELLM_WATCH_CONFIG=True` and passed both the base configuration and the routes directory:
+#### Step 5: LiteLLM gateway Deployment (static config mount)
+
+Mount Git-synced ConfigMaps. `LITELLM_WATCH_CONFIG` remains useful for **platform PRs** that change routes without restarting pods; it is not the circuit-breaker path.
 
 ```yaml
 apiVersion: apps/v1
@@ -934,50 +973,49 @@ spec:
             name: litellm-team-routes
 ```
 
-When Kyverno patches `litellm-team-routes`, Kubelet updates the `..data` symlink inside `/etc/litellm/routes/`. LiteLLM's directory watcher detects the change and reloads the active routing table in memory within 500 milliseconds, preserving existing streaming connections while immediately throttling the breached team.
-
-#### The Declarative In-Cluster Feedback Loop
+#### Feedback loop (sequence)
 
 ```mermaid
 sequenceDiagram
 autonumber
-participant Bedrock as Amazon Bedrock API
-participant CW as "CloudWatch Metric Alarm (4h)"
-participant CP as "Crossplane MetricAlarm (Observe-Only)"
-participant Kyv as "Kyverno (dynamic-team-inference-circuit-breaker)"
-participant CM as "ConfigMap: litellm-team-routes"
-participant GW as "LiteLLM Gateway (LITELLM_WATCH_CONFIG: True)"
-participant Client as "Client Application (Team Alpha)"
+participant Client as Client (Team Alpha)
+participant GW as LiteLLM Gateway
+participant Bedrock as Amazon Bedrock
+participant CW as CloudWatch Alarm (4h)
+participant CP as Crossplane MetricAlarm
+participant Rec as circuit-reconciler
+participant Prom as Prometheus (optional)
 
-Bedrock->>CW: Invocation Logs record surge (over 2M tokens)
-CW->>CW: State transitions to ALARM
-CP->>CW: Reconcile and fetch live alarm status
-CP->>CP: Update MetricAlarm status.atProvider.stateValue = ALARM
-Kyv->>CP: Detect status update event on team-alpha-token-alarm
-Kyv->>Kyv: Evaluate context: teamId=team-alpha, alarmState=ALARM
-Kyv->>CM: Mutate team-alpha.yaml key to rpm: 0
-CM-->>GW: Directory symlink updates - watcher hot-reloads routing table
-Client->>GW: POST /v1/chat/completions (model: team-alpha-bedrock-profile)
-GW->>GW: Route matches team-alpha-bedrock-profile with rpm: 0 -> RateLimitError
-GW-->>Client: HTTP 429 Too Many Requests (Rate limit exceeded: 0 RPM allowed)
-
-Note over CW,Client: Rolling Window Clears (Cooldown Period Expires)
-CW->>CW: State transitions to OK
-CP->>CW: Reconcile live alarm status
-CP->>CP: Update MetricAlarm status.atProvider.stateValue = OK
-Kyv->>CM: Mutate team-alpha.yaml key back to rpm: 10000
-CM-->>GW: Hot-reload restores active route - Team Alpha traffic resumes
+Client->>GW: chat/completions (virtual key)
+GW->>GW: Layer 1 budget check
+alt Budget exhausted at gateway
+    GW-->>Client: HTTP 429 (seconds)
+else Budget OK
+    GW->>Bedrock: Converse via team AIP
+    Bedrock->>CW: Invocation metrics / logs
+    Prom-->>GW: Alert on token rate (optional, sub-minute)
+    CW->>CW: State → ALARM
+    CP->>CW: Observe sync
+    Rec->>CP: Read stateValue ALARM, teamId team-alpha
+    Rec->>GW: POST /team/block
+    Client->>GW: Next request
+    GW-->>Client: HTTP 429 team blocked
+end
 ```
 
-#### Multi-Team Scaling Blueprint
+#### Multi-team onboarding (GitOps)
 
-To onboard a new team (e.g., Team Beta) into this circuit breaker system, platform engineers do not write new scripts or modify Kyverno policies. You simply declare a new `MetricAlarm` custom resource adhering to the naming convention:
+Add a team without new Kyverno rules:
+
+1. PR to `team-model-entitlements` and `litellm/routes/team-gamma.yaml`.
+2. PR a matching `MetricAlarm` observe CR (`team-gamma-token-alarm`).
+3. Argo syncs routes; Crossplane watches the alarm; the existing reconciler matches the `team-*-token-alarm` naming convention.
 
 ```yaml
 apiVersion: cloudwatch.aws.upbound.io/v1beta1
 kind: MetricAlarm
 metadata:
-  name: team-beta-token-alarm # Matches 'team-*-token-alarm' prefix pattern
+  name: team-beta-token-alarm
   namespace: ai-platform
   annotations:
     crossplane.io/external-name: "Bedrock-TokenBreach-team-beta-4h"
@@ -1000,13 +1038,13 @@ spec:
     name: aws-provider-config
 ```
 
-The instant this manifest is applied to the cluster:
+**Verification checklist**
 
-1. Crossplane begins polling CloudWatch for Team Beta's token consumption.
-2. The existing Kyverno policy automatically matches `team-beta-token-alarm`.
-3. If Team Beta breaches their threshold, Kyverno isolates `team-beta-bedrock-profile` without touching Team Alpha or global cluster workloads.
-
-The entire circuit breaker lifecycle is declared in Git, reconciled by Kubernetes controllers, and enforced at the gateway with zero downtime.
+1. Kyverno rejects client-set `allowed-model`.
+2. Virtual key cannot call a model outside its allowlist.
+3. Synthetic token burn returns LiteLLM 429 before CloudWatch enters ALARM.
+4. Forced `MetricAlarm` status ALARM blocks the team within one reconciler interval.
+5. `argocd app diff` shows **no drift** on `litellm-team-routes` after a block event.
 
 ---
 
@@ -1120,9 +1158,13 @@ Pointing a `livenessProbe` at `GET /health` burns provider tokens on every pod e
 
 A standard 24-hour daily token budget creates a dangerous blind spot for autonomous agent applications. If a microservice enters an unhandled recursion loop or experiences an uncontrolled retry cascade, it can burn an entire team's 24-hour token budget in less than an hour before alerting kicks in. Tiered rolling windows protect your budget at different operational horizons: a 4-hour window catches catastrophic automated loops immediately, an 8-hour window caps usage across a standard business shift, and a 12-hour window enforces half-day stabilization limits.
 
-### How does virtual model route mutation achieve zero-downtime circuit breaking without restarting LiteLLM pods?
+### How do you circuit-break a team without restarting LiteLLM pods or mutating route ConfigMaps?
 
-When LiteLLM runs with `LITELLM_WATCH_CONFIG=True` pointing to a directory (`--config /etc/litellm/base.yaml /etc/litellm/routes/`), the process continuously monitors directory symlinks for filesystem modification events. When Kyverno patches the `litellm-team-routes` ConfigMap to throttle a team's virtual model alias (`rpm: 0`), Kubernetes atomically updates the directory symlink in `/etc/litellm/routes/`. LiteLLM's internal watcher detects this change and reloads the active routing table in process memory within 500 milliseconds. Existing TCP streams and completions for other models continue unaffected, while new requests for the breached team immediately receive an HTTP 429 response without terminating or restarting gateway pods.
+Use **LiteLLM enforcement state**, not Git route YAML, for emergency blocks. Layer 1: team budgets and virtual keys return HTTP 429 at the gateway in seconds when spend exceeds limits. Layer 2: CloudWatch rolling alarms on Bedrock invocation logs. Layer 3: when Crossplane mirrors an alarm to `ALARM`, a **circuit reconciler** (or EventBridge → Lambda) calls the LiteLLM management API (for example `/team/block`) idempotently. Route ConfigMaps stay Argo-synced from Git; `argocd app diff` on `litellm-team-routes` stays clean after a block. `LITELLM_WATCH_CONFIG` is for **platform PRs** that change static routes without rolling pods, not for spend emergencies.
+
+### Why not patch `rpm: 0` with Kyverno on a shared ConfigMap?
+
+It couples two writers (Git and Kyverno), often takes minutes to propagate through reload, rewrites the whole team route file on each toggle, and pushes teams toward ignoring ConfigMap `/data` in Argo CD so self-heal does not revert the block. That hides production state from Git and makes DR from Git alone unsafe if an alarm is still firing.
 
 ---
 
@@ -1136,12 +1178,15 @@ Before making any infrastructure commitments, you can follow this phased impleme
    $$\text{Utilization \%} = \frac{\text{Monthly Baseline Tokens}}{\text{Max Theoretical Hardware Throughput}}$$
    If utilization is below 50%, remain on Amazon Bedrock.
 4. **Deploy Hybrid Slicing**: If volume crosses 2 billion tokens with a stable baseline, provision an internal GPU node group running an optimized inference engine like vLLM. Configure LiteLLM to serve your baseline traffic locally while keeping Bedrock configured as an automated burst and fallback target.
-5. **Enforce Governance**: Apply Kyverno admission policies to lock down EKS Pod Identity and restrict model targets per namespace. Deploy Bedrock Application Inference Profiles with 1-to-1 Team mapping, and declare Crossplane Observe-Only MetricAlarm custom resources to let Kyverno dynamically swap virtual model routes to error targets during budget breaches with zero pod restarts.
+5. **Enforce Governance**: Apply Kyverno **admission-only** policies for entitlements and Pod Identity. Sync LiteLLM routes from Git via Argo CD. Set LiteLLM team budgets and virtual keys, add Prometheus alerts for fast loops, and deploy Crossplane Observe-only `MetricAlarm` resources plus a circuit reconciler (or EventBridge → Lambda) to block teams via the LiteLLM API when CloudWatch alarms fire.
 
 ## References & Technical Documentation
 
 * [LiteLLM Production Best Practices](https://docs.litellm.ai/docs/proxy/prod)
+* [LiteLLM Team Management (block / budgets)](https://docs.litellm.ai/docs/proxy/team)
+* [LiteLLM Proxy Health Checks](https://docs.litellm.ai/docs/proxy/health)
 * [Migrate from Kubernetes Manifests to the Microservices Chart](https://docs.litellm.ai/docs/proxy/manifests_to_microservices)
+* [LiteLLM Security Best Practices](https://docs.litellm.ai/docs/proxy/security_best_practices)
 * [Deploying LLMs on Amazon EKS using vLLM Deep Learning Containers](https://aws.amazon.com/blogs/machine-learning/deploy-llms-on-amazon-eks-using-vllm-deep-learning-containers/)
 * [AWS Samples: Production LiteLLM Bedrock Gateway on EKS](https://github.com/aws-samples/sample-litellm-bedrock-gateway-on-eks)
 * [Implementing Resilience Patterns with Amazon Bedrock and LLM Gateways](https://aws.amazon.com/blogs/machine-learning/implementing-resilience-patterns-with-amazon-bedrock-and-llm-gateway/)
