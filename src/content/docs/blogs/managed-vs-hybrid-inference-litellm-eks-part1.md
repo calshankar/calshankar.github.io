@@ -203,6 +203,12 @@ Managed platforms provide limited options for custom model configurations. If yo
 
 Self-hosting gives you full control of the software runtime. You can dynamically swap dozens of LoRA adapters on top of a single shared base model using vLLM's multi-LoRA feature, or run aggressive FP8 and AWQ quantization kernels to double your serving throughput on smaller, cheaper GPUs.
 
+That is not the only way to run a model tuned on your data. [Amazon Bedrock model customization](https://docs.aws.amazon.com/bedrock/latest/userguide/custom-models.html) keeps **training and inference on AWS-managed Bedrock infrastructure**. You upload datasets (or, for reinforcement fine-tuning, prompts and reward signals), Bedrock runs the job, and you invoke the resulting custom model through the same runtime APIs as stock foundation models. No GPU node groups, no weight sync to EKS, no CUDA babysitting.
+
+Bedrock supports three customization paths today, each documented separately: [supervised fine-tuning](https://docs.aws.amazon.com/bedrock/latest/userguide/custom-model-fine-tuning.html) on labeled input-output pairs, [reinforcement fine-tuning](https://docs.aws.amazon.com/bedrock/latest/userguide/custom-models-reinforcement-fine-tuning.html) with Lambda-defined reward functions and optional invocation-log training data, and [distillation](https://docs.aws.amazon.com/bedrock/latest/userguide/custom-models-distillation.html) from a larger teacher model into a smaller student for cost and latency. Pick the method based on whether you have labels, rewardable outcomes, or a teacher model you trust more than your budget allows at inference time.
+
+In a hybrid LiteLLM layout, a customized Bedrock model still lands behind a **virtual alias** and, in production, a [team-scoped Application Inference Profile](https://docs.aws.amazon.com/bedrock/latest/userguide/inference-profiles.html) so quotas and CUR tags stay consistent with the rest of Part 2. You pay for customization work by tokens processed during training (dataset size × epochs) plus [monthly custom model storage](https://docs.aws.amazon.com/bedrock/latest/userguide/custom-models.html), then pay per inference token like any other Bedrock model. That trade is often right when domain accuracy matters but baseline volume has not yet justified dedicated L4 nodes, or when your compliance boundary allows Bedrock in-region but not operating your own inference fleet.
+
 ### 4. Data Perimeter and Air-Gapped Compliance
 
 In defense environments, specific banking tiers, and sovereign cloud zones, data egress rules strictly forbid sending prompt payloads across public internet boundaries or shared multi-tenant service planes.
@@ -579,12 +585,11 @@ flowchart TD
 Understanding the financial tipping points and the multi-tier routing architecture is only half the battle. In production, allowing microservices to query these models without strict controls leads to runaway spending, shared quota starvation, and admission security holes.
 
 In [Part 2: Enterprise Governance with RBAC, Kyverno Model Whitelisting, and Bedrock Inference Profiles](./managed-vs-hybrid-inference-litellm-eks-part2.md), we implement the full Kubernetes-native control plane:
-
 * **Admission-Level RBAC with Kyverno**: Establishing an authoritative ConfigMap entitlement matrix and anti-tamper admission checks to prevent model forgery.
 * **Bedrock Application Inference Profiles**: Mapping profiles 1-to-1 per team for dedicated quota isolation and AWS CUR cost tagging.
 * **LiteLLM production and security hardening**: Virtual keys, ingress trust boundaries, pinned releases, and a path from single-manifest Deployments to the componentized Helm chart.
 * **Dual-Plane Observability**: Combining sub-second Prometheus metrics with CloudWatch invocation log filters.
-* **Declarative Zero-Downtime Circuit Breaking**: Using Crossplane in Observe-Only mode, Kyverno context variables, modular directory-mounted ConfigMaps, and LiteLLM live config watching (`LITELLM_WATCH_CONFIG=True`) to drop breached teams without container restarts.
+* **Spend circuit breaking (GitOps + LiteLLM API)**: Static routes in Git; LiteLLM budgets for fast 429s; CloudWatch backstop with Crossplane observe and a circuit reconciler or Lambda.
 
 ---
 
@@ -595,6 +600,7 @@ In [Part 2: Enterprise Governance with RBAC, Kyverno Model Whitelisting, and Bed
 * [LiteLLM Production Best Practices](https://docs.litellm.ai/docs/proxy/prod)
 * [LiteLLM Proxy Health Checks](https://docs.litellm.ai/docs/proxy/health)
 * [Analysis of Global GPU Scarcity and Neocloud Economics](https://www.spheron.network/blog/gpu-shortage-2026/)
+* [Customize models in Amazon Bedrock (overview)](https://docs.aws.amazon.com/bedrock/latest/userguide/custom-models.html)
 * [Amazon Bedrock model lifecycle](https://aws.amazon.com/blogs/machine-learning/understanding-amazon-bedrock-model-lifecycle/)
 * [Enforce zero data retention on Amazon Bedrock](https://aws.amazon.com/blogs/security/enforce-zero-data-retention-on-amazon-bedrock-with-bedrock-projects-and-service-control-policies/)
 * [Multi-Provider Generative AI Gateway](https://aws.amazon.com/blogs/machine-learning/streamline-ai-operations-with-the-multi-provider-generative-ai-gateway-reference-architecture/)
