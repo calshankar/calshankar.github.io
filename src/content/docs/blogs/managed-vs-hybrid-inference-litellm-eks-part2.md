@@ -19,6 +19,124 @@ Governing a multi-tenant generative AI platform on Amazon EKS requires coordinat
 3. **Bedrock Application Inference Profiles**: Isolates AWS account quotas, provides cost-allocation tags for the AWS Cost and Usage Report (CUR), and prevents noisy-neighbor throttling across business units.
 4. **Declarative In-Cluster Circuit Breaking via Model Route Mutation**: Crossplane observes live CloudWatch metric alarms in Kubernetes as `MetricAlarm` custom resources. When an alarm triggers, Kyverno detects the status update (`status.atProvider.stateValue`), extracts the breached team name, and dynamically mutates LiteLLM's configuration to swap that team's virtual model alias to an explicit error route. LiteLLM watches its configuration file, hot-reloads in memory with zero container restarts, and drops subsequent prompts with an informative HTTP 429 response.
 
+The manifests in this post are a deliberate starting point: one `Deployment`, modular `ConfigMap` mounts, and Valkey for shared router state. That matches how many teams first land LiteLLM on EKS. Once you run multiple gateway replicas, team-scoped virtual keys, and an Admin UI in production, LiteLLM's own [manifest-to-microservices migration guide](https://docs.litellm.ai/docs/proxy/manifests_to_microservices) is the upgrade path worth planning for.
+
+**Why move to the componentized Helm chart**
+
+| Single-manifest layout | Microservices chart (`gateway`, `backend`, `ui`) |
+| :--- | :--- |
+| One Deployment serves inference, key management, and the Admin UI | LLM traffic scales on `litellm-gateway` without dragging management APIs along |
+| HPA on CPU scales everything together | Gateway HPA can target request or token rate; backend and UI scale independently |
+| Ingress sends all paths to one Service | Path-based routing: `/v1/*` and `/health` to gateway, `/key/*` and `/team/*` to backend, `/ui` to UI |
+| Old pods can stay up while you cut over | Chart installs alongside manifest names (`litellm-gateway` vs `litellm-deployment`) for reversible migration |
+
+Postgres and Valkey stay put; you split `DATABASE_URL` into chart values plus a username/password Secret, pin the chart version to your proxy image tag, and point ingress at the gateway Service when you are ready to retire the monolith. Part 2's Kyverno entitlements, team route ConfigMaps, and Crossplane alarms transfer unchanged into `gateway.config.proxy_config` on the chart.
+
+#### Minimal `values.yaml` for an EKS cutover
+
+Install the chart **alongside** your manifest Deployment first (`ingress.enabled: false`), verify readiness on `litellm-gateway:4000`, then flip ingress in step 7 of the [migration guide](https://docs.litellm.ai/docs/proxy/manifests_to_microservices). Pin the chart version to match your proxy image (example uses `1.98.0`).
+
+Merge `litellm-base-config` and the keys from `litellm-team-routes` into `gateway.config.proxy_config` below. If you keep Kyverno mutating per-team YAML files, mount them with `gateway.extraVolumes` / `gateway.extraVolumeMounts` and pass the same `--config` directory args the monolith Deployment uses.
+
+```yaml
+# helm upgrade --install litellm oci://ghcr.io/berriai/litellm/chart/litellm \
+#   --version 1.98.0 -f values.yaml --wait --timeout 10m
+
+masterKey:
+  secretName: litellm-secrets
+  secretKey: LITELLM_MASTER_KEY
+
+database:
+  writer:
+    host: postgres.internal
+    port: 5432
+    dbname: litellm
+    passwordSecret:
+      name: litellm-db
+      usernameKey: username
+      passwordKey: password
+
+redis:
+  host: valkey-service.ai-platform.svc.cluster.local
+  port: 6379
+  passwordSecret:
+    name: litellm-secrets
+    passwordKey: VALKEY_PASSWORD
+
+gateway:
+  envSecrets:
+    - litellm-secrets
+  extraEnv:
+    - name: LITELLM_MODE
+      value: "PRODUCTION"
+    - name: LITELLM_LOG
+      value: "ERROR"
+    - name: LITELLM_JOB_ROLE
+      value: "serving"
+    - name: PROXY_BASE_URL
+      value: "https://llm.internal.example.com"
+    - name: NO_DOCS
+      value: "True"
+    - name: NO_REDOC
+      value: "True"
+    - name: NO_OPENAPI
+      value: "True"
+  resources:
+    requests: { cpu: "1", memory: 4Gi }
+    limits: { cpu: "1", memory: 4Gi }
+  hpa:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+  config:
+    proxy_config:
+      general_settings:
+        store_model_in_db: true
+        disable_env_credential_login: true
+        proxy_batch_write_at: 60
+        use_redis_transaction_buffer: true
+        trusted_proxy_ranges: ["10.0.0.0/8"]
+        background_health_checks: true
+        health_check_interval: 300
+      litellm_settings:
+        cache: true
+        json_logs: true
+        request_timeout: 600
+      router_settings:
+        routing_strategy: usage-based-routing
+        redis_host: os.environ/REDIS_HOST
+        redis_port: os.environ/REDIS_PORT
+        redis_password: os.environ/REDIS_PASSWORD
+        enable_pre_call_checks: true
+      model_list:
+        - model_name: internal-workhorse
+          litellm_params:
+            model: openai/meta-llama/Llama-3.1-8B-Instruct
+            api_base: http://vllm-llama8b.vllm-serving.svc.cluster.local:8000/v1
+            api_key: not-needed-internal
+        - model_name: team-alpha-bedrock-profile
+          litellm_params:
+            model: bedrock/arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/team-alpha-aip
+            aws_region_name: us-east-1
+            rpm: 10000
+
+backend:
+  envSecrets:
+    - litellm-secrets
+  hpa:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 3
+
+ingress:
+  enabled: false
+  # After verification, enable and set host / className for your internal ALB:
+  # enabled: true
+  # className: alb
+  # controller: alb
+  # host: llm.internal.example.com
+```
+
 ```mermaid
 flowchart TD
     subgraph EKSCluster["Amazon EKS Governance Plane"]
@@ -85,8 +203,10 @@ flowchart TD
 
 >[!IMPORTANT]
 > To prevent constant out-of-sync warnings or infinite reconciliation battles with ArgoCD:
+>
 > 1. Instruct ArgoCD to ignore differences on dynamic annotations stamped by Kyverno.
 > 2. Instruct ArgoCD to ignore differences on the `litellm-team-routes` ConfigMap `data` field so ArgoCD does not immediately revert circuit breaker route mutations.
+>
 ```yaml
 resource.customizations.ignoreDifferences.all: |
   jqPathExpressions:
@@ -282,9 +402,9 @@ If an engineer in `team-analytics` changes `requested-model` to `frontier-reason
 At the API gateway layer, LiteLLM enforces secondary RBAC by issuing virtual keys bound strictly to specific model subsets. A virtual key created for `team-analytics` will reject requests for premier models at runtime anyways:
 
 ```bash
-# Generate a team-restricted virtual key in LiteLLM
+# Generate a team-restricted virtual key (use a scoped admin key, not the master key)
 curl -X POST 'http://litellm-service.ai-platform.svc.cluster.local:4000/key/generate' \
-  -H 'Authorization: Bearer sk-cluster-admin-secret' \
+  -H 'Authorization: Bearer $LITELLM_PLATFORM_ADMIN_KEY' \
   -H 'Content-Type: application/json' \
   -d '{
     "key_alias": "analytics-key",
@@ -344,6 +464,30 @@ Using an Application Inference Profile with a 1-to-1 team mapping provides three
 1. **Granular Cost Attribution**: Cost allocation tags((e.g., team ID, application ID, customer/tenant ID, environment) assigned to `team-alpha-aip` flow directly into the AWS Cost and Usage Report (CUR). FinOps teams can trace cloud spend back to the originating team without writing custom billing scraping scripts.
 2. **Quota and Rate Limit Isolation**: You can request service quota increases or enforce strict TPS/TPM limits on a specific profile ARN. If `team-alpha` exhausts their allocated TPM ceiling, Bedrock throttles their profile while `team-beta` continues operating at full capacity.
 3. **Multi-Region Cross-Region Routing**: Application Inference Profiles can be configured as cross-region profiles. AWS automatically distributes requests across multiple AWS regions (e.g., `us-east-1`, `us-east-2`, and `us-west-2`) to maximize available throughput, bypassing regional capacity bottlenecks while maintaining a single target ARN inside your LiteLLM configuration.
+
+---
+
+### 2b. LiteLLM Security and Production Hardening on EKS
+
+Cluster admission (Kyverno) and gateway policy (virtual keys, spend limits) cover your Kubernetes and API boundaries. LiteLLM still needs proxy-level controls.
+
+**Identity and admin access**
+
+Applications must use scoped virtual keys per workload, not the master key. Disable bootstrap Admin UI login from `UI_USERNAME` / `UI_PASSWORD` / master key once SSO or database users exist (`disable_env_credential_login: true`). Behind an internal ALB, set `trusted_proxy_ranges` to your VPC and load balancer CIDRs so failed UI sign-in rate limits key off the real client IP.
+
+**TLS termination at the ALB**
+
+When HTTPS stops at the load balancer, set `PROXY_BASE_URL` to the browser-facing origin, or configure `use_x_forwarded_for` plus `mcp_trusted_proxy_ranges` so session cookies get the `Secure` flag.
+
+**Shrink the attack surface**
+
+Pin an exact image tag (never `main-latest` in production). Set `LITELLM_MODE=PRODUCTION` to disable dotenv loading. Turn off public Swagger, ReDoc, and OpenAPI with `NO_DOCS`, `NO_REDOC`, and `NO_OPENAPI`. Restrict uploads with an `allowed_file_extensions` allowlist if teams use `/v1/files`.
+
+**Throughput and stability**
+
+Use `proxy_batch_write_at: 60` and, above roughly 1000 RPS, `use_redis_transaction_buffer: true`. Cap DB pool size per worker (`database_connection_pool_limit`) against `maxReplicas` so HPA does not exhaust Postgres. Run `--num_workers 1` per pod and scale replicas horizontally; optionally split `LITELLM_JOB_ROLE=serving` on gateway pods and a single `worker` Deployment for budget resets, as in LiteLLM's production topology example.
+
+The `litellm-base-config` ConfigMap below folds these settings together with the modular routing from Step 1.
 
 ---
 
@@ -480,6 +624,21 @@ data:
     general_settings:
       master_key: os.environ/LITELLM_MASTER_KEY
       store_model_in_db: false
+      disable_env_credential_login: true
+      disable_error_logs: true
+      proxy_batch_write_at: 60
+      use_redis_transaction_buffer: true
+      database_connection_pool_limit: 10
+      trusted_proxy_ranges: ["10.0.0.0/8"]
+      use_x_forwarded_for: true
+      mcp_trusted_proxy_ranges: ["10.0.0.0/8"]
+      allowed_file_extensions: [".jsonl", ".pdf", ".txt"]
+      max_file_size_mb: 50
+      max_request_size_mb: 250
+      background_health_checks: true
+      health_check_interval: 300
+      health_check_details: false
+      enable_drain_endpoint: true
 
     litellm_settings:
       cache: true
@@ -487,13 +646,17 @@ data:
         type: redis
         host: valkey-service.ai-platform.svc.cluster.local
         port: 6379
+        password: os.environ/VALKEY_PASSWORD
       drop_params: true
       set_verbose: false
+      json_logs: true
+      request_timeout: 600
 
     router_settings:
       routing_strategy: usage-based-routing
       redis_host: valkey-service.ai-platform.svc.cluster.local
       redis_port: 6379
+      redis_password: os.environ/VALKEY_PASSWORD
       enable_pre_call_checks: true
 ```
 
@@ -690,16 +853,76 @@ spec:
       labels:
         app: llm-gateway
     spec:
+      serviceAccountName: bedrock-gateway-sa
       containers:
         - name: litellm
-          image: ghcr.io/berriai/litellm:main-latest
-          args: ["--config", "/etc/litellm/base.yaml", "/etc/litellm/routes/"]
+          image: docker.litellm.ai/berriai/litellm:v1.98.0
+          args:
+            - "--config"
+            - "/etc/litellm/base.yaml"
+            - "/etc/litellm/routes/"
+            - "--num_workers"
+            - "1"
+          ports:
+            - containerPort: 4000
+              name: http-metrics
           env:
             - name: LITELLM_WATCH_CONFIG
-              value: "True" # Enables live, zero-restart directory file watching
+              value: "True"
+            - name: LITELLM_MODE
+              value: "PRODUCTION"
+            - name: LITELLM_LOG
+              value: "ERROR"
+            - name: LITELLM_JOB_ROLE
+              value: "serving"
+            - name: PROXY_BASE_URL
+              value: "https://llm.internal.example.com"
+            - name: NO_DOCS
+              value: "True"
+            - name: NO_REDOC
+              value: "True"
+            - name: NO_OPENAPI
+              value: "True"
+            - name: DRAIN_ENDPOINT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: litellm-secrets
+                  key: DRAIN_ENDPOINT_TOKEN
+          envFrom:
+            - secretRef:
+                name: litellm-secrets
+          resources:
+            requests:
+              cpu: "1"
+              memory: 4Gi
+            limits:
+              cpu: "1"
+              memory: 4Gi
+          livenessProbe:
+            httpGet:
+              path: /health/liveliness
+              port: 4000
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health/readiness
+              port: 4000
+            initialDelaySeconds: 120
+            periodSeconds: 15
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - >-
+                    curl -sf -H "X-Drain-Token: ${DRAIN_ENDPOINT_TOKEN}"
+                    http://127.0.0.1:4000/health/drain || true;
+                    sleep 15
           volumeMounts:
             - name: base-config-volume
-              mountPath: /etc/litellm
+              mountPath: /etc/litellm/base.yaml
+              subPath: base.yaml
             - name: team-routes-volume
               mountPath: /etc/litellm/routes
       volumes:
@@ -881,6 +1104,18 @@ Standard Kubernetes RBAC controls cluster-level API actions (such as who can cre
 
 Time-to-First-Token measures the delay between sending a request and receiving the initial token chunk. This window includes network transit, gateway routing overhead, queue waiting time, and prompt prefill compute time. Inter-Token Latency measures the time between each subsequent generated token during the decode phase. TTFT is primarily determined by prompt length and compute availability, while ITL is determined by model parameter size and GPU memory bandwidth.
 
+### Should Kubernetes probes call `/health`, `/health/readiness`, or `/health/liveliness`?
+
+Use the lightweight probe endpoints for the kubelet and load balancer, not `GET /health`.
+
+| Endpoint | Auth | Calls an LLM? | Use for |
+| :--- | :--- | :--- | :--- |
+| `GET /health/liveliness` | No | No | **Liveness**: process is up (`/health/liveness` is the same route, Kubernetes spelling) |
+| `GET /health/readiness` | No | No | **Readiness**: worker can accept traffic; returns 503 if Postgres is configured but unreachable |
+| `GET /health` | Virtual key | Yes (every configured model) | **Operations**: model-up checks, dashboards, on-call runbooks |
+
+Pointing a `livenessProbe` at `GET /health` burns provider tokens on every pod every few seconds and can trip rate limits during deploys. With `background_health_checks: true`, operators and monitors can call `GET /health` less often and read cached results while fallbacks still react to unhealthy deployments. For Postgres or cache diagnostics behind auth, use `GET /health/readiness/details` instead of exposing extra fields on the public readiness URL.
+
 ### Why use multi-hour rolling window alarms (4h, 8h, 12h) instead of standard 24-hour daily quotas?
 
 A standard 24-hour daily token budget creates a dangerous blind spot for autonomous agent applications. If a microservice enters an unhandled recursion loop or experiences an uncontrolled retry cascade, it can burn an entire team's 24-hour token budget in less than an hour before alerting kicks in. Tiered rolling windows protect your budget at different operational horizons: a 4-hour window catches catastrophic automated loops immediately, an 8-hour window caps usage across a standard business shift, and a 12-hour window enforces half-day stabilization limits.
@@ -905,6 +1140,8 @@ Before making any infrastructure commitments, you can follow this phased impleme
 
 ## References & Technical Documentation
 
+* [LiteLLM Production Best Practices](https://docs.litellm.ai/docs/proxy/prod)
+* [Migrate from Kubernetes Manifests to the Microservices Chart](https://docs.litellm.ai/docs/proxy/manifests_to_microservices)
 * [Deploying LLMs on Amazon EKS using vLLM Deep Learning Containers](https://aws.amazon.com/blogs/machine-learning/deploy-llms-on-amazon-eks-using-vllm-deep-learning-containers/)
 * [AWS Samples: Production LiteLLM Bedrock Gateway on EKS](https://github.com/aws-samples/sample-litellm-bedrock-gateway-on-eks)
 * [Implementing Resilience Patterns with Amazon Bedrock and LLM Gateways](https://aws.amazon.com/blogs/machine-learning/implementing-resilience-patterns-with-amazon-bedrock-and-llm-gateway/)
