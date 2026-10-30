@@ -1184,12 +1184,8 @@ Before making any infrastructure commitments, you can follow this phased impleme
 
 * [LiteLLM Production Best Practices](https://docs.litellm.ai/docs/proxy/prod)
 * [LiteLLM Team Management (block / budgets)](https://docs.litellm.ai/docs/proxy/team)
-* [LiteLLM Proxy Health Checks](https://docs.litellm.ai/docs/proxy/health)
-* [Migrate from Kubernetes Manifests to the Microservices Chart](https://docs.litellm.ai/docs/proxy/manifests_to_microservices)
 * [LiteLLM Security Best Practices](https://docs.litellm.ai/docs/proxy/security_best_practices)
-* [Deploying LLMs on Amazon EKS using vLLM Deep Learning Containers](https://aws.amazon.com/blogs/machine-learning/deploy-llms-on-amazon-eks-using-vllm-deep-learning-containers/)
 * [AWS Samples: Production LiteLLM Bedrock Gateway on EKS](https://github.com/aws-samples/sample-litellm-bedrock-gateway-on-eks)
-* [Implementing Resilience Patterns with Amazon Bedrock and LLM Gateways](https://aws.amazon.com/blogs/machine-learning/implementing-resilience-patterns-with-amazon-bedrock-and-llm-gateway/)
 * [Bedrock inference profiles](https://docs.aws.amazon.com/bedrock/latest/userguide/inference-profiles.html)
 * [Configuring Model Providers with LiteLLM](https://docs.aws.amazon.com/bedrock-agentcore/latest/APIReference/API_HarnessLiteLlmModelConfig.html)
 * [Policy Management with Kyverno on Amazon EKS](https://aws.amazon.com/blogs/containers/easy-as-one-two-three-policy-management-with-kyverno-on-amazon-eks/)

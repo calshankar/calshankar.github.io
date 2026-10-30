@@ -595,10 +595,7 @@ In [Part 2: Enterprise Governance with RBAC, Kyverno Model Whitelisting, and Bed
 
 ## References & Technical Documentation
 
-* [How to Track and Limit Amazon Bedrock Usage by User (AWS re:Post)](https://repost.aws/articles/ARoDnASCxDQyGFfaagReMZNw/how-to-track-and-limit-amazon-bedrock-usage-by-user)
 * [LiteLLM Proxy Official Architecture and Documentation](https://docs.litellm.ai/docs/simple_proxy)
-* [LiteLLM Production Best Practices](https://docs.litellm.ai/docs/proxy/prod)
-* [LiteLLM Proxy Health Checks](https://docs.litellm.ai/docs/proxy/health)
 * [Analysis of Global GPU Scarcity and Neocloud Economics](https://www.spheron.network/blog/gpu-shortage-2026/)
 * [Customize models in Amazon Bedrock (overview)](https://docs.aws.amazon.com/bedrock/latest/userguide/custom-models.html)
 * [Amazon Bedrock model lifecycle](https://aws.amazon.com/blogs/machine-learning/understanding-amazon-bedrock-model-lifecycle/)
