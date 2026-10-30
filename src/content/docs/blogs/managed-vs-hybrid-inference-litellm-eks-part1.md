@@ -1,5 +1,6 @@
 ---
 title: Stop Renting GPUs You Do Not Fill Part1 - The Math Behind Amazon Bedrock, Frontier Models, and Hybrid EKS Routing
+description: Managed APIs vs. Self-Hosted Silicon, Tipping Point - When to Move Beyond Amazon Bedrock to Hybrid Inference on EKS
 sidebar:
   order: 5
 ---
@@ -330,7 +331,11 @@ flowchart TB
 
 ## Production LiteLLM Routing and Guardrail Configuration
 
-The following production `config.yaml` demonstrates how to configure LiteLLM on EKS to handle multi-tier routing, automated fallbacks, and real-time spend limits.
+The following production `config.yaml` demonstrates how to configure LiteLLM on EKS to handle multi-tier routing, automated fallbacks, and real-time spend limits. It also applies recommendations from the [LiteLLM production checklist](https://docs.litellm.ai/docs/proxy/prod): batched spend writes, trusted proxy ranges for ingress-aware rate limiting, and background model health checks so fallbacks react to real upstream failures without hammering every provider on each probe.
+
+Redis (Valkey in this architecture) is not optional once you run more than one gateway pod. LiteLLM uses it for shared rate limits, router state, and cache hits across replicas. Without it, each pod enforces budgets independently and cache locality stays per instance.
+
+For routing strategy, `usage-based-routing` fits this hybrid story because it weighs deployment load when choosing among fallbacks. At very high request rates, LiteLLM's production guide recommends `simple-shuffle` because it avoids extra Redis lookups on every request. Measure both under your traffic shape before you freeze the strategy.
 
 ```yaml
 # LiteLLM Production Configuration for Amazon EKS
@@ -340,6 +345,18 @@ general_settings:
   enforce_user_param: true
   max_user_budget: 100.0
   budget_duration: 30d
+  # Production checklist: batch spend DB writes (default is per-request)
+  proxy_batch_write_at: 60
+  # Required behind an internal ALB / Ingress so Admin UI login rate limits use the real client IP
+  trusted_proxy_ranges: ["10.0.0.0/8"]
+  # Probe upstream models in the background; GET /health serves cached results (see Health Checks doc)
+  background_health_checks: true
+  health_check_interval: 300
+  health_check_details: false
+  # Only probe tiers that drive automatic fallbacks (each check costs tokens on managed APIs)
+  background_health_check_model_groups:
+    - internal-workhorse
+    - internal-workhorse-burst
 
 litellm_settings:
   cache: true
@@ -350,6 +367,8 @@ litellm_settings:
     password: os.environ/VALKEY_PASSWORD
   drop_params: true
   set_verbose: false
+  json_logs: true
+  request_timeout: 600
   success_callback: ["s3", "prometheus"]
   failure_callback: ["s3", "prometheus"]
   s3_callback_params:
@@ -365,6 +384,9 @@ router_settings:
   num_retries: 3
   timeout: 15
   retry_after: 1
+  fallbacks:
+    - internal-workhorse: [internal-workhorse-burst]
+    - frontier-reasoning: [frontier-reasoning-fallback]
 
 model_list:
   # Tier 1: Local Dedicated Self-Hosted Models (Primary Workhorses)
@@ -375,6 +397,9 @@ model_list:
       api_key: "not-needed-internal"
       rpm: 6000
       tpm: 5000000
+    model_info:
+      mode: chat
+      health_check_timeout: 30
 
   # Tier 2: Managed Serverless Capacity (Cloud Burst & High Concurrency)
   # Uses the Bedrock Application Inference Profile ARN for granular team metrics
@@ -382,24 +407,27 @@ model_list:
     litellm_params:
       model: bedrock/arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/team-core-workhorse-profile
       aws_region_name: us-east-1
+    model_info:
+      mode: chat
+      health_check_max_tokens: 16
 
   # Tier 3: Managed Frontier Reasoning Models via Application Inference Profile
   - model_name: frontier-reasoning
     litellm_params:
       model: bedrock/arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/team-core-claude-profile
       aws_region_name: us-east-1
+    model_info:
+      mode: chat
+      disable_background_health_check: true
 
   # Tier 4: Direct Fallback Frontier Provider
   - model_name: frontier-reasoning-fallback
     litellm_params:
       model: openai/gpt-4o
       api_key: os.environ/OPENAI_API_KEY
-
-# Dynamic Fallback Matrix
-router_settings:
-  fallbacks:
-    - internal-workhorse: [internal-workhorse-burst]
-    - frontier-reasoning: [frontier-reasoning-fallback]
+    model_info:
+      mode: chat
+      disable_background_health_check: true
 ```
 
 This configuration achieves three critical architectural outcomes:
@@ -407,6 +435,34 @@ This configuration achieves three critical architectural outcomes:
 1. **Automatic Saturation Bursting**: Requests targeting `internal-workhorse` hit the local EKS vLLM pod first. If the local pod hits capacity limits, runs out of memory, or fails health checks, LiteLLM redirects the payload to `internal-workhorse-burst` on Amazon Bedrock.
 2. **Cross-Provider Resilience**: If an AWS region experiences an outage or Bedrock API quotas are throttled, requests targeting `frontier-reasoning` instantly fall back to OpenAI GPT-4o without client application code knowing an error occurred.
 3. **Hard Budget Enforcement**: Every request must carry an authenticated user identifier. LiteLLM queries the local Valkey cache before forwarding traffic. If an individual team breaches their monthly budget, LiteLLM returns an immediate HTTP 429 Too Many Requests status code, blocking downstream cloud costs.
+
+---
+
+## Kubernetes Health Probes vs. Model Health Checks
+
+LiteLLM separates two questions that operators often conflate: whether the gateway process should stay in the load balancer pool, and whether each configured model can actually complete a request.
+
+**Process probes (no auth, no LLM calls)** are what the EKS kubelet should use. `/health/liveliness` answers whether the worker is up. `/health/readiness` returns 503 when Postgres is configured but unreachable, so unhealthy pods leave rotation before they accept traffic. Pair them on port 4000 as shown in the [health checks guide](https://docs.litellm.ai/docs/proxy/health):
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /health/liveliness
+    port: 4000
+  periodSeconds: 15
+readinessProbe:
+  httpGet:
+    path: /health/readiness
+    port: 4000
+  initialDelaySeconds: 120
+  periodSeconds: 15
+```
+
+**Model health (costs tokens)** is what you use for routing and operations. `GET /health` with a virtual key runs a real completion against every model. With `background_health_checks: true` in `general_settings`, the proxy probes on an interval and `/health` returns the cached snapshot, which is what you want when Prometheus or an on-call engineer polls frequently. Scope expensive frontier endpoints with `disable_background_health_check` or `background_health_check_model_groups` so you are not burning Claude or GPT-4o budget on a five-minute loop.
+
+For graceful rollouts during deploys, enable `general_settings.enable_drain_endpoint: true` and call `GET /health/drain` from a `preStop` hook so in-flight streams finish before the pod terminates.
+
+See [Part 2 FAQ](./managed-vs-hybrid-inference-litellm-eks-part2.md#should-kubernetes-probes-call-health-healthreadiness-or-healthliveliness) for a probe-path cheat sheet (kubelet vs operator `GET /health`).
 
 ---
 
@@ -523,8 +579,10 @@ flowchart TD
 Understanding the financial tipping points and the multi-tier routing architecture is only half the battle. In production, allowing microservices to query these models without strict controls leads to runaway spending, shared quota starvation, and admission security holes.
 
 In [Part 2: Enterprise Governance with RBAC, Kyverno Model Whitelisting, and Bedrock Inference Profiles](./managed-vs-hybrid-inference-litellm-eks-part2.md), we implement the full Kubernetes-native control plane:
+
 * **Admission-Level RBAC with Kyverno**: Establishing an authoritative ConfigMap entitlement matrix and anti-tamper admission checks to prevent model forgery.
 * **Bedrock Application Inference Profiles**: Mapping profiles 1-to-1 per team for dedicated quota isolation and AWS CUR cost tagging.
+* **LiteLLM production and security hardening**: Virtual keys, ingress trust boundaries, pinned releases, and a path from single-manifest Deployments to the componentized Helm chart.
 * **Dual-Plane Observability**: Combining sub-second Prometheus metrics with CloudWatch invocation log filters.
 * **Declarative Zero-Downtime Circuit Breaking**: Using Crossplane in Observe-Only mode, Kyverno context variables, modular directory-mounted ConfigMaps, and LiteLLM live config watching (`LITELLM_WATCH_CONFIG=True`) to drop breached teams without container restarts.
 
@@ -534,6 +592,8 @@ In [Part 2: Enterprise Governance with RBAC, Kyverno Model Whitelisting, and Bed
 
 * [How to Track and Limit Amazon Bedrock Usage by User (AWS re:Post)](https://repost.aws/articles/ARoDnASCxDQyGFfaagReMZNw/how-to-track-and-limit-amazon-bedrock-usage-by-user)
 * [LiteLLM Proxy Official Architecture and Documentation](https://docs.litellm.ai/docs/simple_proxy)
+* [LiteLLM Production Best Practices](https://docs.litellm.ai/docs/proxy/prod)
+* [LiteLLM Proxy Health Checks](https://docs.litellm.ai/docs/proxy/health)
 * [Analysis of Global GPU Scarcity and Neocloud Economics](https://www.spheron.network/blog/gpu-shortage-2026/)
 * [Amazon Bedrock model lifecycle](https://aws.amazon.com/blogs/machine-learning/understanding-amazon-bedrock-model-lifecycle/)
 * [Enforce zero data retention on Amazon Bedrock](https://aws.amazon.com/blogs/security/enforce-zero-data-retention-on-amazon-bedrock-with-bedrock-projects-and-service-control-policies/)
