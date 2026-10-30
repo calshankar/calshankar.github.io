@@ -585,19 +585,6 @@ We use **three enforcement layers** with different speeds, plus a GitOps rule: *
 
 Circuit-breaker **state** does not belong in cloned route files. If you mutate `rpm: 0` in a ConfigMap and tell Argo CD to ignore `/data`, Git stops describing production and disaster recovery from Git can accidentally unblock a team still in ALARM.
 
-#### What we tried first (and why we moved on)
-
-An earlier pattern wired Crossplane `MetricAlarm` status into a Kyverno policy that set `rpm: 0` on a team's route key and relied on `LITELLM_WATCH_CONFIG` to hot-reload. It demos well in Kubernetes, but the stack is slow (often **2–10+ minutes** end to end), rewrites the entire route YAML on every alarm toggle, and forces broad Argo `ignoreDifferences` on ConfigMap data. For fast spend cutoff (**priority: react before the invoice moves**), enforce at LiteLLM first, then automate a management API call.
-
-| Approach | Config writers | Typical brake latency* | Argo ignore on route `/data` | Git shows block state |
-| :--- | :--- | :--- | :--- | :--- |
-| Kyverno mutates route ConfigMap | Git + Kyverno | 2–10+ min | Required | No |
-| GitOps routes + LiteLLM budgets | Git only | Sub-minute at gateway | Not required | Limits in Git; block in LiteLLM audit |
-| + In-cluster circuit reconciler | Git + API state | 1–5 min (CloudWatch-bound) | Not required | Block in LiteLLM audit |
-| + EventBridge → Lambda | Git + API state | 1–4 min (CloudWatch-bound) | Not required | Same |
-
-\*Dominated by CloudWatch evaluation unless LiteLLM budgets or Prometheus alerts fire first.
-
 #### Layer 1: LiteLLM budgets and virtual keys (fastest)
 
 Align team `max_budget`, `budget_duration`, and per-key model allowlists in Git (seeded into LiteLLM with `store_model_in_db: true`). Set gateway budgets **slightly below** CloudWatch alarm thresholds so the proxy returns **HTTP 429** before Bedrock logs accumulate enough tokens to breach the 4-hour window.
