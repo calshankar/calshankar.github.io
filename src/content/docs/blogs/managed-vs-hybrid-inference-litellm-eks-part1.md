@@ -580,15 +580,129 @@ flowchart TD
 
 ---
 
+## Platform teams beyond GPU utilization
+
+Token economics and hybrid routing answer where inference should run. They do not answer why a healthy cluster still serves slow completions, or why FinOps celebrates 90% GPU utilization the same week product misses a latency SLO.
+
+The sections below are the platform layer on top of that math: how production AI actually behaves at scale, how to classify incidents before you tune the scheduler, which capacity tradeoffs you must choose explicitly, and which Kubernetes projects complement Kyverno and Karpenter on EKS.
+
+### How Production AI Workloads Actually Run
+
+The hybrid routing story in this post assumes you already know who owns each model, which GPUs are free, and what happens when latency spikes. That assumption holds longer than most platform teams expect.
+
+With two or three engineers experimenting on a single node, manual allocation works. Someone picks the GPU, everyone knows which checkpoint is loaded, and when inference misbehaves you page the person who deployed it. Ownership is social, not encoded in policy.
+
+Production looks different the moment multiple teams share accelerators, run different model revisions, and treat the same cluster as both training sandboxes and customer-facing inference. The operating model you skipped during experiments shows up as contention, noisy neighbors, queue depth inside vLLM, and arguments about who preempts whom. None of that is solved by buying a bigger gateway or routing more traffic to Bedrock. It is solved by deciding how the platform behaves before the cluster becomes multi-tenant.
+
+Hybrid LiteLLM on EKS sits in the middle: you still need economic routing and burst capacity, but you also need admission policy, queue semantics, and observability that understand tokens and KV pressure, not just pod phases.
+
+### Three Kinds of Problems: Kubernetes, Workload, and Policy
+
+Teams often treat every AI incident as a Kubernetes outage. In practice, failures sort into three buckets, and only the first one is fixed by tuning the scheduler.
+
+**Category 1: Platform and scheduling problems.** The workload never lands correctly: no schedulable GPU, wrong device plugin, broken driver/CUDA mismatch, or topology constraints (NUMA, PCIe, NVLink) that the scheduler cannot satisfy. These resemble classic telco-style hardware assignment problems. Karpenter node pools, GPU operator versions, and topology-aware scheduling live here.
+
+**Category 2: Application and inference-engine problems.** The pod is Running and the kubelet reports Ready, but users see terrible latency. KV cache pressure, internal request queues, a bad model rollout, or concurrency limits inside vLLM do not surface in `kubectl get pods`. A ready pod is not a healthy inference services, akin to stateful apps; LLM serving makes it worse because the bottleneck shifts between prefill compute and decode bandwidth within the same deployment.
+
+**Category 3: Organizational and capacity policy problems.** A research job holds most of the cluster GPUs while a production service needs to scale out. Kubernetes is doing what you configured: there is no free GPU. The cluster is not broken. You never defined whether production preempts development, whether batch training yields to interactive inference, or how burst traffic maps to Bedrock instead of local VRAM.
+
+```mermaid
+flowchart TD
+    Symptom[Symptom: slow or blocked AI traffic] --> Classify{Which bucket?}
+
+    Classify -->|Unschedulable, wrong GPU, driver/topology| K8s[Category 1: Kubernetes / hardware plane]
+    Classify -->|Pod healthy, TTFT or queue depth bad| App[Category 2: Inference runtime / model health]
+    Classify -->|No capacity left, wrong priority winner| Policy[Category 3: Quota, preemption, routing policy]
+
+    K8s --> FixK8s[Node pools, device plugins, topology, Kueue quotas]
+    App --> FixApp[vLLM metrics, model health checks, gateway fallbacks]
+    Policy --> FixPolicy[Entitlements, AIP quotas, hybrid burst to Bedrock]
+```
+
+Part 1 focuses on economics and routing. [Part 2](./managed-vs-hybrid-inference-litellm-eks-part2.md) implements policy enforcement. Both parts still need Category 2 telemetry (TTFT, queue depth, KV pressure) alongside Category 1 node metrics.
+
+### GPU Capacity Tradeoffs Beyond Utilization Percent
+
+GPU capacity is expensive and finite. The default instinct is to maximize utilization on every accelerator. That metric looks great on a FinOps slide right until production misses its latency SLO because you packed too many incompatible workloads on the same silicon.
+
+A better objective is **maximum useful work** within the performance and isolation requirements of each workload class. For inference, useful might mean requests served per dollar at a fixed p99 TTFT. For training, it might mean time-to-checkpoint under a topology constraint. Utilization is a lever, not the goal.
+
+Different workload classes need different treatment:
+
+| Workload class | Sharing vs. exclusivity | What you optimize for |
+| :--- | :--- | :--- |
+| Interactive dev / experimentation | Fine to share; sessions are bursty | Cost per engineer-hour, fast reclaim |
+| Production inference (latency SLO) | Often exclusive or lightly packed | p99 TTFT, queue depth, failover |
+| Distributed training | Needs coordinated multi-GPU placement | NUMA/PCIe/NVLink topology, gang scheduling |
+
+Development looks like five minutes of editing code for every thirty seconds of GPU time. Giving that engineer a full GPU exclusively may waste capacity. Production chat with a 200 ms TTFT target may need you to **accept** lower average utilization so decode latency stays predictable.
+
+Hardware partitioning has its own ceiling. NVIDIA MIG can raise utilization by slicing one physical GPU, but mis-sized partitions can leave substantial memory bandwidth unused on each slice. Sharing technologies (MIG, time-slicing, fractional GPUs) are not interchangeable policies. Pick them per tier, not once for the whole cluster.
+
+Distributed training adds constraints that generic CPU autoscaling never taught your team: eight free GPUs in the cluster is not the same as eight GPUs with the right NVLink topology. The wrong placement can cut effective training throughput without triggering a single Kubernetes warning.
+
+### Emerging Kubernetes Tools Complementing Kyverno and Karpenter
+
+Part 1 already relies on **Karpenter** for GPU node provisioning and **Kyverno** for admission (detailed in Part 2). Those tools solve Category 1 scheduling and Category 3 entitlement stamping. They do not, by themselves, answer fractional GPU sharing, batch queue fairness, or cross-signal incident triage.
+
+Three projects worth planning for as AI traffic grows on EKS:
+
+#### Project HAMi (heterogeneous AI management)
+
+[HAMi](https://github.com/Project-HAMi/HAMi) targets **fractional GPU allocation and heterogeneous accelerators** on Kubernetes. Use it when development and low-priority jobs should share physical GPUs without giving every pod an entire card, while still keeping production inference on dedicated or lightly shared nodes.
+
+**Why HAMi here:** Kyverno decides *who* may run; HAMi helps decide *how much GPU* they consume. That maps directly to the dev-vs-production tradeoff above. It automates device splitting and monitoring in ways a raw `nvidia.com/gpu: 1` resource request cannot express.
+
+#### Kueue (job queueing and quotas)
+
+[Kueue](https://kueue.sigs.k8s.org/) is the Kubernetes-native **queue and quota layer** for batch and training workloads. It integrates with cluster autoscaling so jobs wait in fair queues instead of failing with `Unschedulable`, and it supports priority classes that map to organizational policy.
+
+**Why Kueue here:** Category 3 problems (research consuming the cluster) become explicit queue decisions: cohort limits, preemption, and admitted workload counts. Pair Kueue cohorts with LiteLLM burst routing so interactive traffic escalates to Bedrock when local queues exceed SLO thresholds, instead of silently piling up behind a long training job.
+
+#### Kagent (governed agents on Kubernetes)
+
+[Kagent](https://kagent.dev/) is a platform for running AI agents on Kubernetes (backed by CNCF Agent Substrate), with patterns like **sre-incident-commander**: correlate alerts, metrics, and logs, then draft mitigations for a human to approve before anything mutates production.
+
+**Why Kagent here:** It fits Category 2 triage where evidence spans etcd events, GPU telemetry, vLLM metrics, and recent deploys. It is not a replacement for Kueue, HAMi, or LiteLLM circuit breaking. Use it when the expensive step is assembling a timeline, not when the fix is already a deterministic API call (restart, block team, route burst to Bedrock).
+
+```mermaid
+flowchart LR
+    subgraph Admission["Policy & admission"]
+        Kyverno[Kyverno entitlements]
+    end
+
+    subgraph Capacity["Capacity & sharing"]
+        Karpenter[Karpenter GPU nodes]
+        HAMi[HAMi fractional GPUs]
+        Kueue[Kueue queues / quotas]
+    end
+
+    subgraph Traffic["Request path"]
+        LiteLLM[LiteLLM hybrid router]
+        Bedrock[Bedrock burst tier]
+    end
+
+    Kyverno --> LiteLLM
+    Karpenter --> HAMi
+    Kueue --> Karpenter
+    LiteLLM -->|local SLO pressure| Bedrock
+```
+
+You may not need all three on day one. Sequence them: Karpenter and Kyverno first, then Kueue when batch jobs starve interactive workloads, then HAMi when dev GPU waste becomes a line item, then AI-assisted ops when on-call time shifts from "restart the pod" to "why is TTFT up 4x."
+
+---
+
 ## Moving from Architecture to Implementation (Part 2)
 
 Understanding the financial tipping points and the multi-tier routing architecture is only half the battle. In production, allowing microservices to query these models without strict controls leads to runaway spending, shared quota starvation, and admission security holes.
 
 In [Part 2: Enterprise Governance with RBAC, Kyverno Model Whitelisting, and Bedrock Inference Profiles](./managed-vs-hybrid-inference-litellm-eks-part2.md), we implement the full Kubernetes-native control plane:
+
 * **Admission-Level RBAC with Kyverno**: Establishing an authoritative ConfigMap entitlement matrix and anti-tamper admission checks to prevent model forgery.
 * **Bedrock Application Inference Profiles**: Mapping profiles 1-to-1 per team for dedicated quota isolation and AWS CUR cost tagging.
 * **LiteLLM production and security hardening**: Virtual keys, ingress trust boundaries, pinned releases, and a path from single-manifest Deployments to the componentized Helm chart.
-* **Dual-Plane Observability**: Combining sub-second Prometheus metrics with CloudWatch invocation log filters.
+* **Dual-Plane Observability**: Combining sub-second Prometheus metrics with CloudWatch invocation log filters, plus workload health beyond pod `Ready`.
+* **AI-augmented operations**: Where synthesis helps (incident correlation) and where engineers must keep the call (preemption, rollback, spend policy).
 * **Spend circuit breaking (GitOps + LiteLLM API)**: Static routes in Git; LiteLLM budgets for fast 429s; CloudWatch backstop with Crossplane observe and a circuit reconciler or Lambda.
 
 ---
@@ -601,3 +715,5 @@ In [Part 2: Enterprise Governance with RBAC, Kyverno Model Whitelisting, and Bed
 * [Amazon Bedrock model lifecycle](https://aws.amazon.com/blogs/machine-learning/understanding-amazon-bedrock-model-lifecycle/)
 * [Enforce zero data retention on Amazon Bedrock](https://aws.amazon.com/blogs/security/enforce-zero-data-retention-on-amazon-bedrock-with-bedrock-projects-and-service-control-policies/)
 * [Multi-Provider Generative AI Gateway](https://aws.amazon.com/blogs/machine-learning/streamline-ai-operations-with-the-multi-provider-generative-ai-gateway-reference-architecture/)
+* [Project HAMi (heterogeneous AI management on Kubernetes)](https://github.com/Project-HAMi/HAMi)
+* [Kueue](https://kueue.sigs.k8s.org/)
