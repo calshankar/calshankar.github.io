@@ -10,6 +10,8 @@ In [Part 1 of this series](./managed-vs-hybrid-inference-litellm-eks-part1.md), 
 
 Now in Part 2, we implement the complete governance and enforcement engine inside Amazon EKS.
 
+Part 1 framed production AI as three problem classes (scheduling, inference health, and capacity policy). Governance code handles policy and spend. You still need observability that treats a Ready pod as necessary but not sufficient, and a clear line between automated enforcement and AI-assisted incident synthesis.
+
 When multiple application pods share an AI gateway, governance cannot rely on trust. Without automated policy enforcement, a runaway agent loop or an unoptimized batch job can consume millions of tokens in minutes, running up substantial unplanned cloud spend.
 
 Governing a multi-tenant generative AI platform on Amazon EKS requires coordinating four distinct enforcement tiers:
@@ -518,6 +520,19 @@ LiteLLM exposes a Prometheus `/metrics` endpoint that tracks internal request ro
 
 Platform engineers configure a standard Prometheus `PodMonitor` or `ServiceMonitor` to scrape the gateway pods every 15 seconds.
 
+#### Workload health beyond `Ready`
+
+Part 1 separates Kubernetes problems from inference-engine problems. Part 2's governance stack still fails if operators only watch pod phases.
+
+Treat **four signals** as a minimum production bar:
+
+1. **Gateway plane:** `litellm_latency_per_output_token`, error rates, and budget counters (above).
+2. **Scheduler plane:** GPU allocation failures, Kueue queue depth, and pending Job counts when batch traffic competes with inference.
+3. **Serving plane:** vLLM (or equivalent) queue depth, KV cache utilization, and tokens-per-second per model revision.
+4. **Provider plane:** Bedrock throttling and TPM consumption per Application Inference Profile.
+
+Kubernetes liveness and readiness on LiteLLM should stay lightweight (`/health/liveliness`, `/health/readiness`). Model-level health checks belong in background probes and SRE dashboards, not in the kubelet loop. When Category 2 symptoms appear (Ready pods, angry users), route traffic through LiteLLM fallbacks and page on serving metrics, not on Deployment replica count alone.
+
 For **runaway agent loops**, add Grafana alerts on `litellm_total_tokens` and `litellm_remaining_team_budget_metric` with sub-minute evaluation windows. CloudWatch remains the billing-grade backstop on Bedrock invocation logs; Prometheus catches gateway-side surges before the 4-hour rolling alarm evaluates.
 
 ```yaml
@@ -621,14 +636,14 @@ Crossplane **Observe** mode mirrors each live alarm into `status.atProvider.stat
 
 **Option A (default on EKS): in-cluster `circuit-reconciler`**
 
-- One Deployment, ~30s poll loop over `MetricAlarm` objects named `team-*-token-alarm`.
-- On `ALARM`: idempotent `POST` to LiteLLM management API (block team or set `max_budget` to 0).
-- On `OK`: unblock only if Git declares `autoRecover: true` for that team (see `team-circuit-policy` below). Default is **manual** unblock after incident review.
+* One Deployment, ~30s poll loop over `MetricAlarm` objects named `team-*-token-alarm`.
+* On `ALARM`: idempotent `POST` to LiteLLM management API (block team or set `max_budget` to 0).
+* On `OK`: unblock only if Git declares `autoRecover: true` for that team (see `team-circuit-policy` below). Default is **manual** unblock after incident review.
 
 **Option B: EventBridge → Lambda**
 
-- CloudWatch alarm state change triggers a VPC Lambda that calls the same LiteLLM API through your internal ALB.
-- Useful if you already standardize automation on EventBridge and want **zero** extra cluster controllers. You still record blocks in LiteLLM audit logs; secrets and IAM live outside the GitOps repo.
+* CloudWatch alarm state change triggers a VPC Lambda that calls the same LiteLLM API through your internal ALB.
+* Useful if you already standardize automation on EventBridge and want **zero** extra cluster controllers. You still record blocks in LiteLLM audit logs; secrets and IAM live outside the GitOps repo.
 
 Both options skip ConfigMap reload latency entirely.
 
@@ -1048,6 +1063,38 @@ spec:
 
 ---
 
+## AI-Augmented Operations: Automate Determinism, Augment Judgment
+
+As AI inference becomes a production dependency, the general platform teams ask is where LLM-based tooling belongs in the runbook. The useful split is not "automate everything" versus "hire more SREs." It is **deterministic automation** versus **evidence synthesis that still needs a human decision**.
+
+### Keep deterministic controllers deterministic
+
+Kubernetes already reconciles desired state: restart crashed containers, replace failed replicas, enforce replica counts. An LLM does not improve that loop. Neither does it replace Kyverno admission, LiteLLM budget counters, CloudWatch alarms, or the circuit reconciler in this post. Those paths should stay code, thresholds, and idempotent API calls.
+
+### Automate or augment with AI where evidence is fragmented
+
+AI-assisted operations earn their place when an incident spans etcd events, GPU telemetry, vLLM metrics, recent GitOps syncs, and Bedrock throttle logs. A concrete example: p99 TTFT climbs over twenty minutes while all pods stay Ready. An assistant that correlates a model ConfigMap rollout, rising KV cache pressure, and deeper vLLM queues gives the on-call engineer a **testable hypothesis and the links**, not a confident guess.
+
+High-value patterns:
+
+| Task | AI-assisted? | Why |
+| :--- | :--- | :--- |
+| Pod restart on crash | No | Controllers already handle it |
+| Team circuit break via LiteLLM API | No | Alarm → reconciler → `/team/block` must stay deterministic |
+| Incident timeline across K8s + GPU + vLLM + Bedrock | Yes | Cross-system correlation is slow by hand |
+| Config and policy drift summaries | Yes | Git vs live cluster diffs benefit from narration |
+| Root-cause **decisions** (rollback, preempt train job) | Engineer | Policy and blast radius need accountability |
+
+Operational AI should **show its work**. A plausible sentence without metrics behind it is worse than no answer, because it invites lazy approval. Require citations to Prometheus series, CloudWatch dimensions, or commit SHAs in any generated summary you feed into a postmortem.
+
+[Kagent](https://kagent.dev/)-class Kubernetes agents and similar tools fit the synthesis row. Pair them with the dual-plane observability above and with Kueue/HAMi signals from Part 1 so recommendations reference queue depth and fractional GPU usage, not only pod names.
+
+### Policy problems still belong to humans
+
+When production loses to a long-running research job, no agent should silently delete the research namespace. The fix is a documented priority model (Kueue cohorts, preemption rules, hybrid burst to Bedrock) agreed with product and research leads. AI can surface "team X consumed 82% of GPU-hours this week," but engineering leadership still sets whether that is allowed.
+
+---
+
 ## The ML Engineering Reality Check: When Self-Hosting with vLLM Makes Sense
 
 It is easy to look at raw hardware spreadsheets and conclude that hosting models yourself will save your company hundreds of thousands of dollars.
@@ -1134,6 +1181,10 @@ For an 8-billion parameter model like Llama 3.1 8B, the financial tipping point 
 
 Yes. LiteLLM is designed as an asynchronous Python proxy utilizing `httpx` and `asyncio`. In production deployments on Amazon EKS, the gateway adds between 2 and 5 milliseconds of network latency overhead to the initial Time-to-First-Token (TTFT). For subsequent streaming chunks, the proxy pipes bytes directly through asynchronous generator buffers, introducing virtually no perceptible delay to the end-user.
 
+### How do you tell a Kubernetes problem from an inference-engine problem?
+
+[Reference](https://calshankar.github.io/blogs/managed-vs-hybrid-inference-litellm-eks-part1/#Three-Kinds-of-Problems:) Start with pod phase. If workloads are Pending or CrashLooping on GPU nodes, inspect scheduling, device plugins, drivers, and topology. If pods are Running and Ready but users complain about latency, pivot to Category 2: vLLM queue depth, KV cache pressure, model revision, and LiteLLM routing. If the scheduler reports insufficient GPU capacity while research jobs hold the cluster, you are in Category 3: quotas, Kueue priorities, and hybrid burst policy, not a broken control plane.
+
 ### How does Kyverno secure AI workloads better than standard Kubernetes RBAC?
 
 Standard Kubernetes RBAC controls cluster-level API actions (such as who can create a Pod or read a Secret). It cannot inspect the internal properties of a manifest at admission time. Kyverno evaluates the contents of deployment manifests before they are scheduled. It verifies that pods requesting GPU resources have explicit resource limits, ensures containers run as non-root, checks that client pods only target whitelisted models allowed for their namespace, and strictly blocks any pod outside the authorized `ai-platform` namespace from mounting the AWS IAM ServiceAccount associated with Amazon Bedrock.
@@ -1189,3 +1240,4 @@ Before making any infrastructure commitments, you can follow this phased impleme
 * [Bedrock inference profiles](https://docs.aws.amazon.com/bedrock/latest/userguide/inference-profiles.html)
 * [Configuring Model Providers with LiteLLM](https://docs.aws.amazon.com/bedrock-agentcore/latest/APIReference/API_HarnessLiteLlmModelConfig.html)
 * [Policy Management with Kyverno on Amazon EKS](https://aws.amazon.com/blogs/containers/easy-as-one-two-three-policy-management-with-kyverno-on-amazon-eks/)
+* [Kagent](https://kagent.dev/)
