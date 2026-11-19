@@ -12,7 +12,7 @@ The patterns below come from real master helm repos under a multi-cluster platfo
 
 Both platform and GitOps engineers should find the checklist useful. Sanitize the labels Accordingly for your own org.
 
-The reusable agent/human checklist(WIP) lives in [`argocd-master-repo/SKILL.md`](../skills/argocd-appset/SKILL.md). Use that on every ApplicationSet or Helm pin change in a master helm repo.
+The reusable agent/human checklist(WIP) lives in [argocd-skill](/public/skills/argocd-appset/SKILL.md). Use that on every ApplicationSet or Helm pin change in a master helm repo.
 
 ---
 
@@ -482,7 +482,7 @@ Reviewers alone will not keep `missingkey=error` and operator pins honest across
 
 Promote individual warns to fails per repo once noise is low. Keep operator pins and `missingkey=error` hard from day one.
 
-Details ive in [`argocd-master-repo/SKILL.md`](../skills/argocd-appset/SKILL.md)
+Details live in [argocd-skill](/public/skills/argocd-appset/SKILL.md)
 
 ---
 
