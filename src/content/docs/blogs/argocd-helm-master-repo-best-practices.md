@@ -12,7 +12,7 @@ The patterns below come from real master helm repos under a multi-cluster platfo
 
 Both platform and GitOps engineers should find the checklist useful. Sanitize the labels Accordingly for your own org.
 
-The reusable agent/human checklist(WIP) lives in [argocd-skill](/public/skills/argocd-appset/SKILL.md). Use that on every ApplicationSet or Helm pin change in a master helm repo.
+The reusable agent/human checklist(WIP) lives in [argocd-skill](/skills/argocd-appset/SKILL.md). Use that on every ApplicationSet or Helm pin change in a master helm repo.
 
 ---
 
@@ -251,7 +251,7 @@ Whether it is **release group version pins** or `RollingSync`, the progressive d
 
 **Trade-off:** some enablement apps still use `targetRevision: HEAD` for speed. Treat that as an explicit exception for non-prod developer tooling, not the default for operators that ship CRDs.
 
-When the chart ships CRDs, pair this pin discipline with the gates in [Spot Breaking CRD Changes Before Your Helm Chart Bump Hits the Cluster](./spotting-crd-breaking-changes-helm.md).
+When the chart ships CRDs, pair this pin discipline with the gates in [Spot Breaking CRD Changes Before Your Helm Chart Bump Hits the Cluster](/blogs/spotting-crd-breaking-changes-helm/) and the [`crd-helm-version-guardrails`](/skills/crd-helm-version-guardrails/SKILL.md) checklist.
 
 ---
 
@@ -285,7 +285,7 @@ spec:
 Default the steps to **regions** per environment and does not account for the Env promotion (`dev` → `qa` → `prd`), not as RollingSync stages inside one AppSet. Label each generated Application with the same key the steps match on (here `aws-region`) so the matchers have something stable to select. Applications not matched by any step are left out of the rolling sync and need a manual sync.
 
 >[!NOTE]
->Argo CD’s ApplicationSet RollingSync(beta feature) only advances to the next step once all Application resources matching the current step transition to Healthy and Synced. If you have requirement to perform soak testing via Canary release process, use the native [Argo Rollout](./blogs/progressive-delivery-part2) and wrap it in your ArgoCD Application as helm chart or as OAM Application.
+>Argo CD’s ApplicationSet RollingSync(beta feature) only advances to the next step once all Application resources matching the current step transition to Healthy and Synced. If you have requirement to perform soak testing via Canary release process, use the native [Argo Rollout](/blogs/progressive-delivery-part2/) and wrap it in your ArgoCD Application as helm chart or as OAM Application.
 
 Use RollingSync for multi-region *product* AppSets. For the platform umbrella chart, staged delivery is often the release-group version pins in Practice 5 instead of (or in addition to) RollingSync.
 
@@ -482,7 +482,7 @@ Reviewers alone will not keep `missingkey=error` and operator pins honest across
 
 Promote individual warns to fails per repo once noise is low. Keep operator pins and `missingkey=error` hard from day one.
 
-Details live in [argocd-skill](/public/skills/argocd-appset/SKILL.md)
+Details live in [argocd-skill](/skills/argocd-appset/SKILL.md)
 
 ---
 
@@ -532,5 +532,5 @@ You can temporarily disable auto-sync for all applications in an Argo CD project
 - [Argo project blog](https://blog.argoproj.io/)
 - [Tracking strategies](https://argo-cd.readthedocs.io/en/stable/user-guide/tracking_strategies/)
 - [Helm user guide](https://argo-cd.readthedocs.io/en/stable/user-guide/helm/) (`valueFiles`, `ignoreMissingValueFiles`)
-i- [Progressive Syncs / RollingSync](https://argo-cd.readthedocs.io/en/stable/operator-manual/applicationset/Progressive-Syncs/)
+- [Progressive Syncs / RollingSync](https://argo-cd.readthedocs.io/en/stable/operator-manual/applicationset/Progressive-Syncs/)
 - [ApplicationSet UI / label ergonomics](https://blog.argoproj.io/exposing-applicationsets-beyond-yaml-argo-cds-applicationset-ui-a7a45f3054d2)

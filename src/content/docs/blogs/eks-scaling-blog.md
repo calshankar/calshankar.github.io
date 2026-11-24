@@ -2,7 +2,7 @@
 title: The Kubernetes(EKS) control plane scales gracefully, Until you hit Scaling issues
 description: Kubernetes(EKS) Control Plane scaling walls that you must know when running Clusters @ Scale
 sidebar:
-  order: 2
+  order: 4
 ---
 
 **By Shankar Ramanathan**

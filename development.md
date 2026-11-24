@@ -228,21 +228,106 @@ Lower numbers appear first. Use `2`, `3`, … for the rest. See [Starlight sideb
 ```text
 src/
 ├── pages/index.astro              # Landing: nav, § II Blogs cards, footer
-├── content/docs/
-│   ├── blogs/*.md                 # Blog posts → /blogs/<slug>/
-│   ├── techstack.md
-│   └── about.md
+├── integrations/publishContentArtifacts.mjs   # artefact URLs (see §6)
+├── content/
+│   ├── docs/
+│   │   ├── blogs/*.md             # Blog posts → /blogs/<slug>/
+│   │   ├── techstack.md
+│   │   └── about.md
+│   ├── skills/                    # → /skills/ (§6)
+│   ├── workflow/                  # → /workflow/
+│   ├── scripts/                   # → /blog-scripts/
+│   └── manifests/                 # → /manifests/
 ├── styles/custom.css              # Global + Starlight + landing styles
 └── content.config.ts              # Docs collection (leave as-is)
 
 astro.config.mjs                   # Starlight sidebar (Blogs autogenerate / manual)
+public/scripts/                    # Site JS only (e.g. mermaid-expand) → /scripts/
 ```
 
 Projects remain commented out in `astro.config.mjs` and on the landing page until re-enabled.
 
 ---
 
-## 6. Deploy to GitHub Pages (homepage / index)
+## 6. Link blog posts to artefacts (`skills`, `workflow`, `scripts`, `manifests`)
+
+Blog Markdown lives under `src/content/docs/blogs/`. Downloadable or linkable files that posts reference live in **sibling folders** under `src/content/` (not inside `docs/`, so Starlight does not treat them as pages).
+
+### Layout
+
+```text
+src/content/
+├── docs/blogs/*.md          # Starlight pages → /blogs/<slug>/
+├── skills/                  # e.g. agent SKILL.md packs
+├── workflow/                # workflow YAML, checklists, diagrams
+├── scripts/                 # scripts *referenced by posts* (not site JS)
+└── manifests/               # sample K8s manifests for posts & CI examples
+```
+
+| Folder on disk | Published URL | Example link in a post |
+|----------------|---------------|-------------------------|
+| `src/content/skills/…` | `/skills/…` | `[checklist](/skills/argocd-appset/SKILL.md)` |
+| `src/content/workflow/…` | `/workflow/…` | `[promotion flow](/workflow/argo-rollout-promote.yaml)` |
+| `src/content/scripts/…` | `/blog-scripts/…` | `[helper script](/blog-scripts/audit-appsets.sh)` |
+| `src/content/manifests/…` | `/manifests/…` | `[PushSecret sample](/manifests/eso/pushsecret.yaml)` |
+
+**Do not** prefix links with `/public/` — Astro copies `public/` to the site root, but these artefacts are **not** in `public/`.
+
+**Site runtime JS** (loaded on every page) stays in `public/scripts/` (e.g. `mermaid-expand.js` → `/scripts/mermaid-expand.js`). That path is separate from `src/content/scripts/` → `/blog-scripts/…`.
+
+### How it works
+
+The Astro integration `src/integrations/publishContentArtifacts.mjs`:
+
+1. **Dev** (`npm run dev`) — Vite middleware serves each folder at the URL prefix above.
+2. **Build** (`npm run build`) — copies each folder into `dist/<urlPath>/` so GitHub Pages serves the same URLs in production.
+
+Mount table is exported as `ARTIFACT_MOUNTS` in that file — extend the array to add another artefact category.
+
+### Steps when you add or change an artefact
+
+1. Put the file under the right folder (keep stable paths; posts link by URL).
+2. In the blog `.md`, add a **root-relative** link: `/skills/...`, `/workflow/...`, `/blog-scripts/...`, or `/manifests/...`.
+3. Run `npm run dev` and open the URL directly (e.g. `http://localhost:4321/skills/argocd-appset/SKILL.md`) to confirm it loads.
+4. Run `npm run build` before push (artefacts must appear under `dist/skills/`, `dist/manifests/`, etc.).
+
+You do **not** register artefacts in `content.config.ts` or the Starlight sidebar.
+
+### Adding a new artefact category
+
+Use this checklist whenever you introduce another folder under `src/content/` that should be linkable from posts (not a Starlight page).
+
+| Step | Action |
+|------|--------|
+| 1 | Create `src/content/<new-folder>/` and add files (keep paths stable — posts link by URL). |
+| 2 | In `src/integrations/publishContentArtifacts.mjs`, append to `ARTIFACT_MOUNTS`: `{ subdir: '<new-folder>', urlPath: '<url-segment>' }`. `subdir` is the folder name; `urlPath` is the site URL prefix (often the same string, unless you need to avoid a collision — see `scripts` → `blog-scripts`). |
+| 3 | Confirm `publishContentArtifacts()` is listed in `astro.config.mjs` `integrations` (already required for existing artefact types). |
+| 4 | Add `src/content/<new-folder>/README.md` with the published URL prefix and a pointer to this section. |
+| 5 | Update this §6: layout diagram, mount table, and link examples. |
+| 6 | `npm run dev` — hit `http://localhost:4321/<url-segment>/…` for a sample file. |
+| 7 | `npm run build` — confirm `dist/<url-segment>/` contains the tree before push. |
+
+**`urlPath` constraints:** must not collide with Starlight routes (`/blogs/`, `/about/`, `/techstack/`, …) or with `public/` assets (`/scripts/` is site JS only).
+
+**MIME types:** unknown extensions are served as `application/octet-stream`. Add entries to the `MIME` map in `publishContentArtifacts.mjs` if browsers should render a new text type inline.
+
+**Out of scope for this pattern:** Starlight docs belong under `src/content/docs/` only. Do not register artefact folders in `content.config.ts` or the sidebar unless you deliberately want them as pages.
+
+### Alternative hosting options
+
+| Approach | Pros | Cons |
+|----------|------|------|
+| **`src/content/{skills,workflow,scripts,manifests}` (current)** | Co-located with blog content; versioned with the site; same URLs in dev and prod | Requires the publish integration; not editable as Starlight pages |
+| **`public/skills/`, etc.** | Zero config; Astro copies as-is | Mixes “source” with static assets; easy to confuse with site `public/scripts/` |
+| **GitHub links** (`github.com/.../blob/main/...`) | Good for very large files or repos readers should fork | Off-site; raw view vs HTML; breaks if repo moves |
+| **Separate repo + releases** | Clear ownership for skills/tooling | Two places to update; cross-linking discipline |
+| **Starlight doc per artefact** (`src/content/docs/skills/...`) | Rendered in theme, search, sidebar | Sidebar noise unless you hide the tree; heavy for raw `.sh` / `.yaml` |
+
+For this site, **`src/content/` + static publish** keeps posts and artefacts in one repo without polluting the blog sidebar.
+
+---
+
+## 7. Deploy to GitHub Pages (homepage / index)
 
 Local builds write the real homepage to `dist/index.html` via `src/pages/index.astro`. There is **no** `index.html` in the git repo root — and that is correct.
 
