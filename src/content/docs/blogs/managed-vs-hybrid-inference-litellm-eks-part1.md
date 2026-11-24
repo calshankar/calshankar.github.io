@@ -2,7 +2,7 @@
 title: Stop Renting GPUs You Do Not Fill Part1 - The Math Behind Amazon Bedrock, Frontier Models, and Hybrid EKS Routing
 description: Managed APIs vs. Self-Hosted Silicon, Tipping Point - When to Move Beyond Amazon Bedrock to Hybrid Inference on EKS
 sidebar:
-  order: 5
+  order: 2
 ---
 *By Shankar Ramanathan*
 

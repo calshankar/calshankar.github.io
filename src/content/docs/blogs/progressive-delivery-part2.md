@@ -2,7 +2,7 @@
 title: KubeVela + OAM ~ The Abstraction Your Dev Team Actually Needs - Part 2
 description: Use the Open Application Model (OAM) with KubeVela to wrap Argo Rollouts, AnalysisTemplates, HLA, and ArgoCD ApplicationSets into a single YAML that any developer can ship in under an hour.
 sidebar:
-  order: 7
+  order: 8
 ---
 
 *By Shankar Ramanathan*

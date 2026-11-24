@@ -1,0 +1,45 @@
+# Example workflow — copy to your chart-pin repo as `.github/workflows/crd-compat.yml`.
+# This site publishes the file at /workflow/crd-compat.yml for download; it is not active CI here.
+#
+# Paths below assume the operator repo vendors fixtures and scripts like this site:
+#   src/content/manifests/eso/
+#   src/content/scripts/crd-compat.sh
+# Adjust paths to your layout (e.g. charts/eso/fixtures/, hack/crd-compat.sh).
+
+name: CRD compatibility
+
+on:
+  pull_request:
+    paths:
+      - '**/Chart.yaml'
+      - '**/Chart.lock'
+      - '**/values*.yaml'
+      - 'src/content/manifests/**'
+      - 'src/content/scripts/crd-compat.sh'
+
+jobs:
+  crd-compat:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install crdify
+        run: go install sigs.k8s.io/crdify@latest
+
+      - name: Install Pluto
+        run: |
+          curl -fsSL "$(curl -s https://api.github.com/repos/FairwindsOps/pluto/releases/latest | jq -r '.assets[] | select(.name | test("linux_amd64\\.tar\\.gz$")) | .browser_download_url' | head -1)" | tar -xz pluto
+          sudo mv pluto /usr/local/bin/
+
+      - name: Install kubeconform & Python dependencies
+        run: |
+          curl -fsSL "https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz" | tar -xz kubeconform
+          sudo mv kubeconform /usr/local/bin/
+          pip install pyyaml
+
+      - name: Compare CRDs and scan fixtures
+        env:
+          OLD_VER: '0.16.2'
+          NEW_VER: '0.17.0'
+          KUBERNETES_VERSION: '1.34.0'
+        run: bash src/content/scripts/crd-compat.sh --all-gates

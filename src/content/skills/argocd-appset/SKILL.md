@@ -22,7 +22,7 @@ KubeVela/OAM apps). Companion narrative:
 [argocd-helm-master-repo-best-practices.md](../argocd-helm-master-repo-best-practices.md).
 
 For CRD schema breaks on chart bumps, also load
-[crd-helm-version-guardrails](../SKILL.md).
+[crd-helm-version-guardrails](../crd-helm-version-guardrails/SKILL.md).
 
 ## When this skill applies
 
@@ -258,7 +258,7 @@ Either way:
 
 If `targetRevision` moves an operator that ships CRDs:
 
-1. Run [crd-helm-version-guardrails](../SKILL.md) (crdify + Pluto + kubeconform).
+1. Run [crd-helm-version-guardrails](../crd-helm-version-guardrails/SKILL.md) (crdify + Pluto + kubeconform).
 2. Record `crdImpact` in the PR.
 3. Do not rely on `helm upgrade` to mutate existing CRDs.
 
@@ -326,6 +326,6 @@ from day one.
 4. Link readers to
    [argocd-helm-master-repo-best-practices.md](../argocd-helm-master-repo-best-practices.md)
    for narrative context; keep this file as the executable checklist.
-5. When CRDs are in scope, chain to [../SKILL.md](../SKILL.md).
+5. When CRDs are in scope, chain to [crd-helm-version-guardrails](../crd-helm-version-guardrails/SKILL.md).
 6. Prefer adding or updating the §12 CI checks over one-off review comments.
 7. Do not commit or push unless the user asks.

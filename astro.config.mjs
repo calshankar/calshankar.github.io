@@ -2,11 +2,13 @@
 import mermaid from 'astro-mermaid';
 import starlight from '@astrojs/starlight';
 import { defineConfig } from 'astro/config';
+import publishContentArtifacts from './src/integrations/publishContentArtifacts.mjs';
 
 // https://astro.build/config
 export default defineConfig({
 	site: 'https://calshankar.github.io',
 	integrations: [
+		publishContentArtifacts(),
 		// Must come BEFORE starlight so ```mermaid fences are transformed
 		mermaid({
 			theme: 'neutral',

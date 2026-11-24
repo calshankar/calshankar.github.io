@@ -2,7 +2,7 @@
 title: Stop Renting GPUs You Do Not Fill Part2 - Enterprise Governance with RBAC, Kyverno Model Whitelisting, and Bedrock Inference Profiles
 description: Governing gen-AI platform - Routing Multi-Provider Inference with LiteLLM, Kyverno, Crossplane on EKS
 sidebar:
-  order: 6
+  order: 3
 ---
 *By Shankar Ramanathan*
 
